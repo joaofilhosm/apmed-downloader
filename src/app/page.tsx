@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { baixarMaterialComoPdf, type Progresso } from '@/lib/download';
 
 type Material = {
   id: number;
@@ -15,7 +16,6 @@ type Material = {
 type Etapa = 1 | 2 | 3;
 
 export default function Pagina() {
-  // Estado geral
   const [etapa, setEtapa] = useState<Etapa>(1);
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -27,8 +27,8 @@ export default function Pagina() {
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState('');
   const [baixando, setBaixando] = useState('');
+  const [progresso, setProgresso] = useState<Progresso | null>(null);
 
-  // Instituicoes disponiveis (para os botoes de filtro)
   const instituicoes = useMemo(() => {
     const set = new Set<string>();
     materiais.forEach((m) => m.slug && set.add(m.slug));
@@ -40,9 +40,7 @@ export default function Pagina() {
     [materiais, filtro],
   );
 
-  /* ---------------------------------------------------------------- */
-  /* Passo 1 - Entrar                                                */
-  /* ---------------------------------------------------------------- */
+  /* ---------------- Passo 1 - Entrar ---------------- */
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
     setErro('');
@@ -55,7 +53,7 @@ export default function Pagina() {
       });
       const json = await res.json();
       if (!json.ok) {
-        setErro(json.erro || 'Nao foi possivel entrar.');
+        setErro(json.erro || 'Não foi possível entrar.');
         return;
       }
       setSessaoId(json.sessaoId);
@@ -63,15 +61,13 @@ export default function Pagina() {
       setEtapa(2);
       setMensagem(`Conectado! Encontramos ${json.total} materiais na sua conta.`);
     } catch {
-      setErro('Nao foi possivel falar com o servidor. Verifique sua internet.');
+      setErro('Não foi possível falar com o servidor. Verifique sua internet.');
     } finally {
       setCarregando(false);
     }
   }
 
-  /* ---------------------------------------------------------------- */
-  /* Passo 2 - Escolher o que baixar                                   */
-  /* ---------------------------------------------------------------- */
+  /* ---------------- Passo 2 - Escolher ---------------- */
   function alternar(id: number) {
     setSelecionados((atual) => {
       const novo = new Set(atual);
@@ -81,43 +77,27 @@ export default function Pagina() {
     });
   }
 
-  function selecionarTodos() {
-    setSelecionados(new Set(visiveis.map((m) => m.id)));
-  }
-
-  function limparSelecao() {
-    setSelecionados(new Set());
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* Passo 3 - Baixar                                                 */
-  /* ---------------------------------------------------------------- */
+  /* ---------------- Passo 3 - Baixar ---------------- */
   async function baixarIndividual(materialId: number, titulo: string) {
     setErro('');
-    setBaixando(`Preparando "${titulo}". Isso pode levar alguns segundos...`);
+    setProgresso(null);
+    setBaixando(`Preparando "${titulo}"...`);
     try {
-      const res = await fetch(
-        `/api/pdf?sessaoId=${encodeURIComponent(sessaoId)}&materialId=${materialId}`,
+      const { blob, nome, totalPaginas } = await baixarMaterialComoPdf(
+        sessaoId,
+        materialId,
+        setProgresso,
       );
-
-      if (!res.ok) {
-        const erroJson = await res.json().catch(() => ({}));
-        setErro(erroJson.erro || 'Falha ao gerar o PDF.');
-        setBaixando('');
-        return;
-      }
-
-      const blob = await res.blob();
-      const disposition = res.headers.get('content-disposition') || '';
-      const match = disposition.match(/filename="?([^"]+)"?/);
-      const nome = match ? match[1] : `material_${materialId}.pdf`;
-
       salvarArquivo(blob, nome);
-      setMensagem(`"${titulo}" foi baixado com sucesso!`);
+      setMensagem(`"${titulo}" (${totalPaginas} páginas) foi baixado com sucesso!`);
       setBaixando('');
-    } catch {
-      setErro('Erro de conexao durante o download. Tente novamente.');
+      setProgresso(null);
+    } catch (e) {
+      setErro(
+        e instanceof Error ? e.message : 'Erro de conexão durante o download.',
+      );
       setBaixando('');
+      setProgresso(null);
     }
   }
 
@@ -129,36 +109,43 @@ export default function Pagina() {
       return;
     }
     setBaixando(
-      `Gerando ${ids.length} material(is) em um arquivo ZIP. ` +
-        `Isso pode levar de 10 segundos a alguns minutos...`,
+      `Gerando ${ids.length} material(is). Materiais grandes levam alguns minutos...`,
     );
     try {
-      const res = await fetch('/api/zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessaoId, materialIds: ids }),
-      });
+      const JSZipMod = await import('jszip');
+      const zip = new JSZipMod.default();
 
-      if (!res.ok) {
-        const erroJson = await res.json().catch(() => ({}));
-        setErro(erroJson.erro || 'Falha ao gerar o ZIP.');
-        setBaixando('');
-        return;
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const material = materiais.find((m) => m.id === id);
+        const { blob, nome } = await baixarMaterialComoPdf(
+          sessaoId,
+          id,
+          (p) =>
+            setProgresso({
+              ...p,
+              etapa: `Material ${i + 1} de ${ids.length}: ${p.etapa}`,
+            }),
+        );
+        zip.file(nome, blob);
       }
 
-      const blob = await res.blob();
-      salvarArquivo(blob, 'materiais_apmed.zip');
+      const buffer = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+      salvarArquivo(buffer, 'materiais_apmed.zip');
       setMensagem(`${ids.length} material(is) baixados em um arquivo ZIP!`);
       setBaixando('');
-    } catch {
-      setErro('Erro de conexao durante o download. Tente novamente.');
+      setProgresso(null);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao gerar o ZIP.');
       setBaixando('');
+      setProgresso(null);
     }
   }
 
-  /* ---------------------------------------------------------------- */
-  /* Navegacao                                                        */
-  /* ---------------------------------------------------------------- */
   function recomecar() {
     setEtapa(1);
     setSessaoId('');
@@ -170,9 +157,11 @@ export default function Pagina() {
     setSenha('');
   }
 
-  /* ---------------------------------------------------------------- */
-  /* Render                                                           */
-  /* ---------------------------------------------------------------- */
+  const percentual = progresso?.paginasTotal
+    ? Math.round((progresso.paginasBaixadas / progresso.paginasTotal) * 100)
+    : 0;
+
+  /* ---------------- Render ---------------- */
   return (
     <main className="container">
       <header className="cabecalho">
@@ -180,7 +169,6 @@ export default function Pagina() {
         <p>Baixe seus materiais de estudo do portal APMED em PDF, em 3 passos.</p>
       </header>
 
-      {/* Indicador de passos */}
       <div className="passos">
         <div className={`passo ${etapa === 1 ? 'ativo' : etapa > 1 ? 'feito' : ''}`}>
           <span className="num">{etapa > 1 ? '✓' : '1'}</span>
@@ -201,8 +189,8 @@ export default function Pagina() {
         <div className="cartao">
           <h2>1. Entre com sua conta</h2>
           <p className="ajuda">
-            Use o mesmo e-mail e senha que voce usa no site do APMED. Suas
-            credenciais nao ficam salvas - a sessao dura apenas 30 minutos.
+            Use o mesmo e-mail e senha que você usa no site do APMED. Suas
+            credenciais não ficam salvas — a sessão dura apenas 30 minutos.
           </p>
 
           {erro && <div className="aviso erro">{erro}</div>}
@@ -235,7 +223,7 @@ export default function Pagina() {
                 disabled={carregando}
               />
               <p className="dica">
-                Sua senha e usada apenas para abrir a sessao e nunca e gravada.
+                Sua senha é usada apenas para abrir a sessão e nunca é gravada.
               </p>
             </div>
 
@@ -258,7 +246,7 @@ export default function Pagina() {
         <div className="cartao">
           <h2>2. Escolha o que baixar</h2>
           <p className="ajuda">
-            Clique nas caixas para marcar os materiais. Depois va para o passo 3
+            Clique nas caixas para marcar os materiais. Depois vá para o passo 3
             para baixar.
           </p>
 
@@ -311,10 +299,16 @@ export default function Pagina() {
           </div>
 
           <div className="linha-botoes">
-            <button className="botao secundario" onClick={selecionarTodos}>
+            <button
+              className="botao secundario"
+              onClick={() => setSelecionados(new Set(visiveis.map((m) => m.id)))}
+            >
               Marcar todos
             </button>
-            <button className="botao secundario" onClick={limparSelecao}>
+            <button
+              className="botao secundario"
+              onClick={() => setSelecionados(new Set())}
+            >
               Desmarcar
             </button>
           </div>
@@ -338,16 +332,42 @@ export default function Pagina() {
         <div className="cartao">
           <h2>3. Baixar</h2>
           <p className="ajuda">
-            Baixe um material por vez ou gere um unico ZIP com todos os
+            Baixe um material por vez ou gere um único ZIP com todos os
             selecionados.
           </p>
 
           {mensagem && <div className="aviso sucesso">{mensagem}</div>}
           {erro && <div className="aviso erro">{erro}</div>}
+
           {baixando && (
             <div className="carregando">
               <span className="girando" />
               <span>{baixando}</span>
+            </div>
+          )}
+
+          {progresso && progresso.paginasTotal > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div
+                style={{
+                  height: 10,
+                  background: '#e2e8f0',
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${percentual}%`,
+                    height: '100%',
+                    background: '#1d4ed8',
+                    transition: 'width 0.3s',
+                  }}
+                />
+              </div>
+              <p className="dica" style={{ marginTop: 6 }}>
+                {progresso.etapa} — {percentual}%
+              </p>
             </div>
           )}
 
