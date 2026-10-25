@@ -10,9 +10,7 @@ import {
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
 
-// A Vercel exige maxDuration entre 1 e 60 para Serverless Functions.
 // Em planos com Fluid compute, 60s e o maximo aceito no schema atual.
-export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /** Numero maximo de paginas por requisicao (protege memoria da funcao). */

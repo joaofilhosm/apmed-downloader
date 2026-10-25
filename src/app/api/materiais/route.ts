@@ -9,7 +9,6 @@ import {
 } from '@/lib/apmed';
 
 // Downstream pode precisar de mais de 60s para responder.
-export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /** Rate limit simples por IP: maximo de 20 logins por 10 minutos. */

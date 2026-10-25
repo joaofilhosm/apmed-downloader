@@ -10,7 +10,6 @@ import {
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
 
-export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /** Limite de paginas somadas (memoria da funcao serverless). */
