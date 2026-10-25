@@ -3,20 +3,20 @@ import {
   obterSessao,
   obterTokenLeitura,
   contarPaginas,
-  baixarPaginas,
+  baixarPagina,
   listarMateriais,
   limparCachePaginas,
   ApmedError,
 } from '@/lib/apmed';
-import { gerarPdf, nomeArquivo } from '@/lib/pdf';
+import { ConstrutorPdf, nomeArquivo } from '@/lib/pdf';
 
-// Em planos com Fluid compute, 60s e o maximo aceito no schema atual.
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
-/** Numero maximo de paginas por requisicao (protege memoria da funcao). */
+/** Numero maximo de paginas por requisicao. */
 const MAX_PAGINAS = 200;
 
-/** Quantidade de paginas baixadas em paralelo. */
+/** Paginas processadas em paralelo durante a varredura. */
 const CONCORRENCIA = 3;
 
 function erro(mensagem: string, status = 500) {
@@ -57,32 +57,22 @@ export async function GET(req: NextRequest) {
       materialId,
       token,
       MAX_PAGINAS,
-      3,
+      CONCORRENCIA,
     );
 
     if (total <= 0) {
       return erro('Nao foi possivel ler as paginas deste material.', 502);
     }
-    if (total > MAX_PAGINAS) {
-      return erro(
-        `Este material tem ${total} paginas, acima do limite por download. ` +
-          `Fale com o suporte para materiais maiores.`,
-        413,
-      );
+
+    // Monta o PDF pagina a pagina: cada imagem e convertida para JPEG e
+    // liberada em seguida, para nao estourar a memoria da funcao.
+    const construtor = await ConstrutorPdf.criar();
+    for (let p = 1; p <= total; p++) {
+      const buffer = await baixarPagina(sessao.cookie, materialId, p, token);
+      await construtor.adicionar(buffer);
     }
 
-    // Baixa todas as paginas em paralelo (3 por vez).
-    const indices = Array.from({ length: total }, (_, i) => i + 1);
-    const buffers = await baixarPaginas(
-      sessao.cookie,
-      materialId,
-      indices,
-      token,
-      2400,
-      CONCORRENCIA,
-    );
-
-    const pdf = await gerarPdf(buffers.map((buffer) => ({ buffer })));
+    const pdf = await construtor.finalizar(material.titulo);
 
     const nome = nomeArquivo(material.titulo, 'pdf');
     return new NextResponse(new Uint8Array(pdf), {

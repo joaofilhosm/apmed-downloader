@@ -4,12 +4,12 @@ import {
   obterSessao,
   obterTokenLeitura,
   contarPaginas,
-  baixarPaginas,
+  baixarPagina,
   listarMateriais,
   limparCachePaginas,
   ApmedError,
 } from '@/lib/apmed';
-import { gerarPdf, nomeArquivo } from '@/lib/pdf';
+import { ConstrutorPdf, nomeArquivo } from '@/lib/pdf';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,18 +85,15 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const indices = Array.from({ length: total }, (_, i) => i + 1);
-        const buffers = await baixarPaginas(
-          sessao.cookie,
-          id,
-          indices,
-          token,
-          2400,
-          CONCORRENCIA,
-        );
+        // Monta o PDF pagina a pagina, liberando memoria a cada etapa.
+        const construtor = await ConstrutorPdf.criar();
+        for (let p = 1; p <= total; p++) {
+          const buffer = await baixarPagina(sessao.cookie, id, p, token);
+          await construtor.adicionar(buffer);
+        }
         paginasUsadas += total;
 
-        const pdf = await gerarPdf(buffers.map((buffer) => ({ buffer })));
+        const pdf = await construtor.finalizar(material.titulo);
         zip.file(nomeArquivo(material.titulo, 'pdf'), pdf);
       } catch (e) {
         avisos.push(
