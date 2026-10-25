@@ -6,6 +6,7 @@ import {
   contarPaginas,
   baixarPaginas,
   listarMateriais,
+  limparCachePaginas,
   ApmedError,
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
@@ -64,7 +65,14 @@ export async function POST(req: NextRequest) {
       const material = disponiveis.find((m) => m.id === id)!;
       try {
         const token = await obterTokenLeitura(sessao.cookie, id);
-        const total = await contarPaginas(sessao.cookie, id);
+        limparCachePaginas(id);
+        const total = await contarPaginas(
+          sessao.cookie,
+          id,
+          token,
+          MAX_PAGINAS_TOTAL,
+          3,
+        );
 
         if (total <= 0) {
           avisos.push(`${material.titulo}: nao foi possivel ler as paginas.`);

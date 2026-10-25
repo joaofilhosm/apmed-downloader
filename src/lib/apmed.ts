@@ -428,27 +428,124 @@ export async function obterTokenLeitura(
   return { exp: Number(json.exp), token: String(json.token) };
 }
 
+/**
+ * Descobre o total REAL de paginas de um material.
+ *
+ * ATENCAO: a API `material_reader.php` devolve `last_page` desatualizado -
+ * ela reflete o progresso de leitura do aluno, nao o total do material.
+ * Exemplo real: o material id=1 reporta `last_page=1`, mas tem 59 paginas.
+ * Por isso NAO confiamos apenas nesse valor.
+ *
+ * O portal devolve 404 (ou resposta invalida) alem da ultima pagina real.
+ * Estratégia hibrida:
+ *
+ *  1. Varredura sequencial a partir da pagina 1, em blocos paralelos.
+ *     - 3 requisicoes por vez, o que mantem o tempo baixo sem abusar do portal.
+ *     - Para quando encontra 2 paginas consecutivas inexistentes.
+ *  2. A varredura e a fonte da verdade: devolve exatamente quais paginas
+ *     existem, sem depender de monotonicidade.
+ *
+ * O cache por material evita sondar o mesmo numero de pagina duas vezes
+ * entre a fase de descoberta e a fase de download.
+ */
+
+/** Cache de paginas ja verificadas: "materialId:pagina" -> boolean. */
+const cachePaginas = new Map<string, boolean>();
+
+function chavePagina(materialId: number, pagina: number) {
+  return `${materialId}:${pagina}`;
+}
+
+/** Limpa o cache de um material (usar apos um token novo). */
+export function limparCachePaginas(materialId: number) {
+  for (const k of Array.from(cachePaginas.keys())) {
+    if (k.startsWith(`${materialId}:`)) cachePaginas.delete(k);
+  }
+}
+
+/**
+ * Verifica se a pagina existe. Reusa o cache quando possivel.
+ */
+export async function paginaExiste(
+  cookie: string,
+  materialId: number,
+  pagina: number,
+  token: TokenLeitura,
+): Promise<boolean> {
+  const key = chavePagina(materialId, pagina);
+  const cached = cachePaginas.get(key);
+  if (cached !== undefined) return cached;
+
+  let existe = false;
+  try {
+    const buffer = await baixarPagina(cookie, materialId, pagina, token);
+    existe = buffer.length > 512;
+  } catch {
+    existe = false;
+  }
+  cachePaginas.set(key, existe);
+  return existe;
+}
+
+/**
+ * Descobre o total real de paginas, varredura sequencial paralela.
+ */
 export async function contarPaginas(
   cookie: string,
   materialId: number,
+  token: TokenLeitura,
+  maximo = 300,
+  concorrencia = 3,
 ): Promise<number> {
-  const res = await req(`${BASE}/api/material_reader.php?material_id=${materialId}`, {
-    headers: {
-      Referer: `${BASE}/aluno/material_visualizar.php?id=${materialId}`,
-      Accept: 'application/json,text/plain,*/*',
-    },
-    cookie,
-  });
+  const ref = `${BASE}/aluno/material_visualizar.php?id=${materialId}`;
 
-  if (!res.ok) return 0;
+  // 1) piso: o que a API oficial informa (apenas informativo)
+  let piso = 0;
   try {
-    const json = (await res.json()) as Record<string, unknown>;
-    const cand =
-      json.last_page ?? json.page_count ?? json.total_pages ?? json.total ?? 0;
-    return Number(cand) || 0;
+    const res = await req(`${BASE}/api/material_reader.php?material_id=${materialId}`, {
+      headers: { Referer: ref, Accept: 'application/json,text/plain,*/*' },
+      cookie,
+    });
+    if (res.ok) {
+      const json = (await res.json()) as Record<string, unknown>;
+      piso = Number(json.last_page ?? json.page_count ?? json.total_pages ?? json.total ?? 0) || 0;
+    }
   } catch {
-    return 0;
+    piso = 0;
   }
+  if (piso <= 0) piso = 1;
+
+  // 2) varredura sequencial a partir da pagina 1.
+  //    Processa em blocos de `concorrencia` e para em 2 falhas seguidas.
+  let ultimaExistente = piso;
+  let falhasConsecutivas = 0;
+  let cursor = piso + 1;
+
+  while (cursor <= maximo && falhasConsecutivas < 2) {
+    const bloco: number[] = [];
+    for (let i = 0; i < concorrencia && cursor + i <= maximo; i++) {
+      bloco.push(cursor + i);
+    }
+
+    const resultados = await Promise.all(
+      bloco.map((p) => paginaExiste(cookie, materialId, p, token)),
+    );
+
+    for (let i = 0; i < bloco.length; i++) {
+      const p = bloco[i];
+      if (resultados[i]) {
+        ultimaExistente = p;
+        falhasConsecutivas = 0;
+      } else {
+        falhasConsecutivas++;
+        if (falhasConsecutivas >= 2) break;
+      }
+    }
+
+    cursor += bloco.length;
+  }
+
+  return ultimaExistente;
 }
 
 export async function baixarPagina(

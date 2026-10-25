@@ -3,9 +3,9 @@ import {
   obterSessao,
   obterTokenLeitura,
   contarPaginas,
-  baixarPagina,
   baixarPaginas,
   listarMateriais,
+  limparCachePaginas,
   ApmedError,
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
@@ -14,7 +14,7 @@ import { gerarPdf, nomeArquivo } from '@/lib/pdf';
 export const dynamic = 'force-dynamic';
 
 /** Numero maximo de paginas por requisicao (protege memoria da funcao). */
-const MAX_PAGINAS = 120;
+const MAX_PAGINAS = 200;
 
 /** Quantidade de paginas baixadas em paralelo. */
 const CONCORRENCIA = 3;
@@ -48,22 +48,17 @@ export async function GET(req: NextRequest) {
     }
 
     const token = await obterTokenLeitura(sessao.cookie, materialId);
-    let total = await contarPaginas(sessao.cookie, materialId);
+    limparCachePaginas(materialId);
 
-    if (total <= 0) {
-      // Descobre o total testando paginas (em pequenos blocos).
-      const teste = await baixarPaginas(sessao.cookie, materialId, [1, 2, 3], token);
-      total = teste.length;
-      while (total < MAX_PAGINAS) {
-        const prox = total + 1;
-        try {
-          await baixarPagina(sessao.cookie, materialId, prox, token);
-          total = prox;
-        } catch {
-          break;
-        }
-      }
-    }
+    // Varredura real: a API oficial do APMED reporta last_page desatualizado
+    // (o progresso de leitura do aluno), entao Discovermos o total de verdade.
+    const total = await contarPaginas(
+      sessao.cookie,
+      materialId,
+      token,
+      MAX_PAGINAS,
+      3,
+    );
 
     if (total <= 0) {
       return erro('Nao foi possivel ler as paginas deste material.', 502);
