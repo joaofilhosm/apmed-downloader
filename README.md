@@ -132,3 +132,11 @@ src/
 
 Uso pessoal. Este projeto acessa uma API interna do portal APMED em nome do
 usuário que fornece as próprias credenciais.
+
+---
+
+## 🚀 Producao
+
+- **URL:** https://apmed.vercel.app
+- **Repositorio:** https://github.com/joaofilhosm/apmed-downloader
+- **Deploy automatico:** cada push na branch `master` publica na Vercel.
