@@ -449,6 +449,9 @@ export async function obterTokenLeitura(
  * entre a fase de descoberta e a fase de download.
  */
 
+/** Largura usada na sondagem (menor = resposta mais leve). */
+const LARGURA_SONDAGEM = 600;
+
 /** Cache de paginas ja verificadas: "materialId:pagina" -> boolean. */
 const cachePaginas = new Map<string, boolean>();
 
@@ -478,8 +481,26 @@ export async function paginaExiste(
 
   let existe = false;
   try {
-    const buffer = await baixarPagina(cookie, materialId, pagina, token);
-    existe = buffer.length > 512;
+    // Pede apenas os primeiros bytes (Range). Se a pagina existir, o portal
+    // devolve 206/200 com o inicio do PNG; se nao existir, devolve 404.
+    // Isso evita baixar ~1 MB por pagina apenas para testar existencia.
+    const url =
+      `${BASE}/api/material_page.php?material_id=${materialId}&page=${pagina}` +
+      `&width=${LARGURA_SONDAGEM}&exp=${token.exp}&token=${token.token}`;
+
+    const res = await req(url, {
+      headers: {
+        Referer: `${BASE}/aluno/material_visualizar.php?id=${materialId}`,
+        Accept: 'image/*,*/*;q=0.8',
+        Range: 'bytes=0-1023',
+      },
+      cookie,
+    });
+
+    if (res.ok || res.status === 206) {
+      const buffer = Buffer.from(await res.arrayBuffer());
+      existe = buffer.length > 0;
+    }
   } catch {
     existe = false;
   }
@@ -489,13 +510,17 @@ export async function paginaExiste(
 
 /**
  * Descobre o total real de paginas, varredura sequencial paralela.
+ *
+ * A varredura e a parte mais lenta do fluxo: para um material de 100 paginas
+ * sao ~100 requisicoes. Por isso ela roda com varias conexoes em paralelo e
+ * a contagem e feita em blocos.
  */
 export async function contarPaginas(
   cookie: string,
   materialId: number,
   token: TokenLeitura,
   maximo = 300,
-  concorrencia = 3,
+  concorrencia = 5,
 ): Promise<number> {
   const ref = `${BASE}/aluno/material_visualizar.php?id=${materialId}`;
 
@@ -515,8 +540,8 @@ export async function contarPaginas(
   }
   if (piso <= 0) piso = 1;
 
-  // 2) varredura sequencial a partir da pagina 1.
-  //    Processa em blocos de `concorrencia` e para em 2 falhas seguidas.
+  // 2) varredura sequencial a partir da pagina 1, em blocos paralelos.
+  //    Para quando encontra 2 paginas consecutivas inexistentes.
   let ultimaExistente = piso;
   let falhasConsecutivas = 0;
   let cursor = piso + 1;
