@@ -12,17 +12,74 @@
  * apenas em memoria (Map) e expira sozinha.
  */
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 const BASE = process.env.APMED_BASE_URL || 'https://gestaoapmed.com.br/provas';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36';
 
-/** Sessões ativas: sessionId -> { cookie, criadoEm, ultimoUso } */
-const sessoes = new Map();
+/**
+ * Sessoes stateless assinadas.
+ *
+ * Em serverless, cada requisicao pode cair numa instancia diferente e um
+ * `Map` em memoria nao sobrevive a isso. Por isso a sessao e um token
+ * assinado (HMAC-SHA256) que carrega o PHPSESSID do APMED no payload.
+ * O servidor valida a assinatura a cada uso, sem precisar de estado.
+ *
+ * A senha nunca entra no token - apenas o cookie de sessao do APMED.
+ */
+
+const SEGREDO =
+  process.env.APMED_SESSION_SECRET || 'apmed-dev-secret-troque-em-producao';
 
 /** Tempo maximo de vida de uma sessao (30 min). */
 const SESSAO_TTL_MS = 30 * 60 * 1000;
+
+function b64url(buf: Buffer): string {
+  return buf
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function b64urlDecode(s: string): Buffer {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64');
+}
+
+function assinar(payload: string): string {
+  return b64url(createHmac('sha256', SEGREDO).update(payload).digest());
+}
+
+/** Gera um token de sessao assinado contendo o cookie do APMED. */
+function gerarTokenSessao(cookie: string): string {
+  const exp = Date.now() + SESSAO_TTL_MS;
+  const payload = b64url(Buffer.from(JSON.stringify({ c: cookie, e: exp })));
+  return `${payload}.${assinar(payload)}`;
+}
+
+/** Valida um token de sessao. Retorna o cookie ou null. */
+function validarTokenSessao(token: string): string | null {
+  if (!token || !token.includes('.')) return null;
+  const [payload, assinatura] = token.split('.');
+  if (!payload || !assinatura) return null;
+
+  const a = Buffer.from(assinatura);
+  const b = Buffer.from(assinar(payload));
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const dados = JSON.parse(b64urlDecode(payload).toString('utf8'));
+    if (typeof dados.c !== 'string' || typeof dados.e !== 'number') return null;
+    if (Date.now() > dados.e) return null;
+    return dados.c;
+  } catch {
+    return null;
+  }
+}
 
 /** Tempo maximo de uma requisicao ao APMED. */
 const TIMEOUT_MS = Number(process.env.APMED_TIMEOUT_MS || 25000);
@@ -36,13 +93,6 @@ export function gerarId(): string {
     Math.random().toString(36).slice(2, 12) +
     Math.random().toString(36).slice(2, 12)
   );
-}
-
-function limparSessoesExpiradas() {
-  const agora = Date.now();
-  for (const [id, s] of sessoes) {
-    if (agora - s.ultimoUso > SESSAO_TTL_MS) sessoes.delete(id);
-  }
 }
 
 /** Remove acentos, normaliza caixa e separadores, para comparar nomes. */
@@ -106,13 +156,10 @@ async function req(url: string, opts: OpcoesFetch = {}): Promise<Response> {
 export type Sessao = {
   id: string;
   cookie: string;
-  criadoEm: number;
-  ultimoUso: number;
+  expiraEm: number;
 };
 
 export function criarSessao(email: string, senha: string): Promise<Sessao> {
-  limparSessoesExpiradas();
-
   const body = new URLSearchParams({ email, password: senha }).toString();
 
   return (async () => {
@@ -163,27 +210,37 @@ export function criarSessao(email: string, senha: string): Promise<Sessao> {
       }
     }
 
-    const sessao: Sessao = {
-      id: gerarId(),
+    return {
+      id: gerarTokenSessao(cookie),
       cookie,
-      criadoEm: Date.now(),
-      ultimoUso: Date.now(),
+      expiraEm: Date.now() + SESSAO_TTL_MS,
     };
-    sessoes.set(sessao.id, sessao);
-    return sessao;
   })();
 }
 
+/** Recupera o cookie a partir do token assinado. */
 export function obterSessao(id: string): Sessao | null {
-  limparSessoesExpiradas();
-  const s = sessoes.get(id);
-  if (!s) return null;
-  s.ultimoUso = Date.now();
-  return s;
+  const cookie = validarTokenSessao(id);
+  if (!cookie) return null;
+  return { id, cookie, expiraEm: Date.now() + SESSAO_TTL_MS };
 }
 
-export function destruirSessao(id: string): void {
-  sessoes.delete(id);
+/**
+ * Encerra a sessao no lado do APMED (logout). O token assinado continua
+ * valido ate expirar, mas o PHPSESSID ja nao da mais acesso ao portal.
+ */
+export async function destruirSessao(id: string): Promise<void> {
+  const cookie = validarTokenSessao(id);
+  if (!cookie) return;
+  try {
+    await req(`${BASE}/logout.php`, {
+      method: 'GET',
+      headers: { Referer: `${BASE}/aluno/dashboard.php` },
+      cookie,
+    });
+  } catch {
+    // logout best-effort
+  }
 }
 
 /* ------------------------------------------------------------------ */

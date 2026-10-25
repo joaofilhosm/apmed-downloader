@@ -114,6 +114,6 @@ export async function GET(req: NextRequest) {
 /** DELETE /api/materiais?sessaoId=... encerra a sessao. */
 export async function DELETE(req: NextRequest) {
   const sessaoId = req.nextUrl.searchParams.get('sessaoId') || '';
-  destruirSessao(sessaoId);
+  await destruirSessao(sessaoId);
   return NextResponse.json({ ok: true });
 }
