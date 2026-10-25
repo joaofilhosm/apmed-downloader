@@ -4,20 +4,22 @@ import {
   obterTokenLeitura,
   contarPaginas,
   baixarPagina,
+  baixarPaginas,
   listarMateriais,
   ApmedError,
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
 
-// Materiais grandes podem levar tempo. Limite do plano Hobby: 300s.
-export const maxDuration = 300;
+// A Vercel exige maxDuration entre 1 e 60 para Serverless Functions.
+// Em planos com Fluid compute, 60s e o maximo aceito no schema atual.
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /** Numero maximo de paginas por requisicao (protege memoria da funcao). */
 const MAX_PAGINAS = 120;
 
-/** Descanso entre paginas, em ms. */
-const INTERVALO_MS = 150;
+/** Quantidade de paginas baixadas em paralelo. */
+const CONCORRENCIA = 3;
 
 function erro(mensagem: string, status = 500) {
   return NextResponse.json({ ok: false, erro: mensagem }, { status });
@@ -51,15 +53,17 @@ export async function GET(req: NextRequest) {
     let total = await contarPaginas(sessao.cookie, materialId);
 
     if (total <= 0) {
-      // Descobre o total testando paginas.
-      for (let p = 1; p <= MAX_PAGINAS; p++) {
+      // Descobre o total testando paginas (em pequenos blocos).
+      const teste = await baixarPaginas(sessao.cookie, materialId, [1, 2, 3], token);
+      total = teste.length;
+      while (total < MAX_PAGINAS) {
+        const prox = total + 1;
         try {
-          await baixarPagina(sessao.cookie, materialId, p, token);
-          total = p;
+          await baixarPagina(sessao.cookie, materialId, prox, token);
+          total = prox;
         } catch {
           break;
         }
-        await dormir(INTERVALO_MS);
       }
     }
 
@@ -74,14 +78,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const paginas: { buffer: Buffer }[] = [];
-    for (let p = 1; p <= total; p++) {
-      const buffer = await baixarPagina(sessao.cookie, materialId, p, token);
-      paginas.push({ buffer });
-      if (p < total) await dormir(INTERVALO_MS);
-    }
+    // Baixa todas as paginas em paralelo (3 por vez).
+    const indices = Array.from({ length: total }, (_, i) => i + 1);
+    const buffers = await baixarPaginas(
+      sessao.cookie,
+      materialId,
+      indices,
+      token,
+      2400,
+      CONCORRENCIA,
+    );
 
-    const pdf = await gerarPdf(paginas);
+    const pdf = await gerarPdf(buffers.map((buffer) => ({ buffer })));
 
     const nome = nomeArquivo(material.titulo, 'pdf');
     return new NextResponse(new Uint8Array(pdf), {
@@ -98,8 +106,4 @@ export async function GET(req: NextRequest) {
     console.error('[apmed] erro ao gerar PDF:', e instanceof Error ? e.message : e);
     return erro('Erro inesperado ao montar o PDF. Tente novamente.', 500);
   }
-}
-
-function dormir(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }

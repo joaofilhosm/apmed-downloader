@@ -4,28 +4,24 @@ import {
   obterSessao,
   obterTokenLeitura,
   contarPaginas,
-  baixarPagina,
+  baixarPaginas,
   listarMateriais,
   ApmedError,
 } from '@/lib/apmed';
 import { gerarPdf, nomeArquivo } from '@/lib/pdf';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /** Limite de paginas somadas (memoria da funcao serverless). */
 const MAX_PAGINAS_TOTAL = 150;
 /** Quantidade maxima de materiais num unico ZIP. */
 const MAX_MATERIAIS = 12;
-
-const INTERVALO_MS = 150;
+/** Paginas baixadas em paralelo. */
+const CONCORRENCIA = 3;
 
 function erro(mensagem: string, status = 500) {
   return NextResponse.json({ ok: false, erro: mensagem }, { status });
-}
-
-function dormir(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
@@ -82,14 +78,18 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const paginas: { buffer: Buffer }[] = [];
-        for (let p = 1; p <= total; p++) {
-          paginas.push({ buffer: await baixarPagina(sessao.cookie, id, p, token) });
-          paginasUsadas += 1;
-          if (p < total) await dormir(INTERVALO_MS);
-        }
+        const indices = Array.from({ length: total }, (_, i) => i + 1);
+        const buffers = await baixarPaginas(
+          sessao.cookie,
+          id,
+          indices,
+          token,
+          2400,
+          CONCORRENCIA,
+        );
+        paginasUsadas += total;
 
-        const pdf = await gerarPdf(paginas);
+        const pdf = await gerarPdf(buffers.map((buffer) => ({ buffer })));
         zip.file(nomeArquivo(material.titulo, 'pdf'), pdf);
       } catch (e) {
         avisos.push(

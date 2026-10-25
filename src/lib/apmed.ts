@@ -423,6 +423,44 @@ export async function baixarPagina(
   return buffer;
 }
 
+
+/**
+ * Baixa varias paginas em paralelo, com limite de concorrencia.
+ * Retorna os buffers na ordem das paginas solicitadas.
+ */
+export async function baixarPaginas(
+  cookie: string,
+  materialId: number,
+  paginas: number[],
+  token: TokenLeitura,
+  largura = 2400,
+  concorrencia = 3,
+): Promise<Buffer[]> {
+  const resultados: (Buffer | null)[] = new Array(paginas.length).fill(null);
+  let proximo = 0;
+
+  async function worker() {
+    while (true) {
+      const indice = proximo++;
+      if (indice >= paginas.length) return;
+      const pagina = paginas[indice];
+      try {
+        resultados[indice] = await baixarPagina(cookie, materialId, pagina, token, largura);
+      } catch {
+        resultados[indice] = null;
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concorrencia, paginas.length) }, () => worker());
+  await Promise.all(workers);
+
+  return resultados.map((r, i) => {
+    if (!r) throw new ApmedError(`Falha ao baixar a pagina ${paginas[i]}.`, 502);
+    return r;
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Erros                                                               */
 /* ------------------------------------------------------------------ */
