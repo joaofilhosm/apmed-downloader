@@ -19,12 +19,16 @@ function erro(mensagem: string, status = 500) {
 }
 
 /**
- * GET /api/pdf/parte?sessaoId=...&materialId=...&de=N&ate=M
+ * GET /api/pdf/parte?sessaoId=...&materialId=...&de=N&ate=M[&formato=jpg|png]
  *
- * Baixa as paginas N..M do material e devolve as imagens ja convertidas
- * para JPEG, empacotadas em JSON (base64) para o navegador montar o PDF.
+ * Baixa as paginas N..M do material e devolve as imagens, empacotadas em
+ * JSON (base64) para o navegador montar o PDF.
  *
- * Materiais grandes sao divididos em partes pelo `/api/pdf/manifesto`.
+ * `formato=jpg` (padrao): imagens reescaladas para JPEG 1700px, que sao
+ * leves e足以 para montar o PDF.
+ *
+ * `formato=png`: devolve o PNG ORIGINAL do portal (2400px), usado quando o
+ * usuario quer tambem os arquivos de imagem originais junto com o PDF.
  */
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -32,6 +36,7 @@ export async function GET(req: NextRequest) {
   const materialId = Number(params.get('materialId'));
   const de = Number(params.get('de'));
   const ate = Number(params.get('ate'));
+  const formato = (params.get('formato') || 'jpg').toLowerCase();
 
   if (!materialId || Number.isNaN(materialId)) {
     return erro('Material invalido.', 400);
@@ -41,6 +46,9 @@ export async function GET(req: NextRequest) {
   }
   if (ate - de + 1 > MAX_POR_PARTE) {
     return erro(`Cada parte pode ter no maximo ${MAX_POR_PARTE} paginas.`, 400);
+  }
+  if (formato !== 'jpg' && formato !== 'png') {
+    return erro("Formato invalido. Use 'jpg' ou 'png'.", 400);
   }
 
   const sessao = obterSessao(sessaoId);
@@ -55,17 +63,34 @@ export async function GET(req: NextRequest) {
 
     const token = await obterTokenLeitura(sessao.cookie, materialId);
 
-    const paginas: { pagina: number; jpeg: string; largura: number; altura: number }[] = [];
+    const paginas: {
+      pagina: number;
+      dados: string;
+      largura: number;
+      altura: number;
+    }[] = [];
 
     for (let p = de; p <= ate; p++) {
       const buffer = await baixarPagina(sessao.cookie, materialId, p, token);
-      const { bytes, width, height } = await prepararPaginaJpeg(buffer);
-      paginas.push({
-        pagina: p,
-        jpeg: bytes.toString('base64'),
-        largura: width,
-        altura: height,
-      });
+
+      if (formato === 'png') {
+        // PNG original do portal.
+        paginas.push({
+          pagina: p,
+          dados: buffer.toString('base64'),
+          largura: 2400,
+          altura: 3395,
+        });
+      } else {
+        // JPEG reescalado (leve, para montar o PDF).
+        const { bytes, width, height } = await prepararPaginaJpeg(buffer);
+        paginas.push({
+          pagina: p,
+          dados: bytes.toString('base64'),
+          largura: width,
+          altura: height,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -73,6 +98,7 @@ export async function GET(req: NextRequest) {
       materialId,
       de,
       ate,
+      formato,
       paginas,
     });
   } catch (e) {

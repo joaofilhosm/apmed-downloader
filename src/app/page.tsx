@@ -1,7 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { baixarMaterialComoPdf, type Progresso } from '@/lib/download';
+import {
+  baixarMaterialComoPdf,
+  baixarInstituicaoComoZip,
+  baixarSelecaoComoZip,
+  type Progresso,
+} from '@/lib/download';
 
 type Material = {
   id: number;
@@ -14,6 +19,9 @@ type Material = {
 };
 
 type Etapa = 1 | 2 | 3;
+
+/** Como o usuario quer baixar. */
+type ModoDownload = 'individual' | 'instituicao';
 
 export default function Pagina() {
   const [etapa, setEtapa] = useState<Etapa>(1);
@@ -29,10 +37,19 @@ export default function Pagina() {
   const [baixando, setBaixando] = useState('');
   const [progresso, setProgresso] = useState<Progresso | null>(null);
 
+  // Preferencias de download
+  const [modo, setModo] = useState<ModoDownload>('individual');
+  const [incluirPngs, setIncluirPngs] = useState(false);
+
   const instituicoes = useMemo(() => {
-    const set = new Set<string>();
-    materiais.forEach((m) => m.slug && set.add(m.slug));
-    return [...set].sort();
+    const mapa = new Map<string, { slug: string; nome: string; total: number }>();
+    materiais.forEach((m) => {
+      if (!m.slug) return;
+      const atual = mapa.get(m.slug);
+      if (atual) atual.total += 1;
+      else mapa.set(m.slug, { slug: m.slug, nome: m.instituicao, total: 1 });
+    });
+    return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome));
   }, [materiais]);
 
   const visiveis = useMemo(
@@ -93,50 +110,66 @@ export default function Pagina() {
       setBaixando('');
       setProgresso(null);
     } catch (e) {
-      setErro(
-        e instanceof Error ? e.message : 'Erro de conexão durante o download.',
-      );
+      setErro(e instanceof Error ? e.message : 'Erro de conexão durante o download.');
       setBaixando('');
       setProgresso(null);
     }
   }
 
-  async function baixarTodos() {
+  async function baixarSelecao() {
     setErro('');
     const ids = [...selecionados];
     if (!ids.length) {
       setErro('Selecione pelo menos um material.');
       return;
     }
+    setBaixando(`Gerando ${ids.length} material(is). Materiais grandes levam alguns minutos...`);
+    try {
+      const { blob, nome, totalMateriais } = await baixarSelecaoComoZip(
+        sessaoId,
+        ids,
+        { incluirPngs },
+        setProgresso,
+      );
+      salvarArquivo(blob, nome);
+      setMensagem(
+        `${totalMateriais} material(is) baixados em um arquivo ZIP${
+          incluirPngs ? ' (com os PNGs originais)' : ''
+        }!`,
+      );
+      setBaixando('');
+      setProgresso(null);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao gerar o ZIP.');
+      setBaixando('');
+      setProgresso(null);
+    }
+  }
+
+  async function baixarInstituicao() {
+    setErro('');
+    if (!filtro) {
+      setErro('Escolha uma instituição no filtro acima.');
+      return;
+    }
+    const inst = instituicoes.find((i) => i.slug === filtro);
     setBaixando(
-      `Gerando ${ids.length} material(is). Materiais grandes levam alguns minutos...`,
+      `Baixando todos os materiais de ${inst?.nome ?? filtro} (${
+        inst?.total ?? 0
+      } material(is)). Pode levar bastante tempo...`,
     );
     try {
-      const JSZipMod = await import('jszip');
-      const zip = new JSZipMod.default();
-
-      for (let i = 0; i < ids.length; i++) {
-        const id = ids[i];
-        const material = materiais.find((m) => m.id === id);
-        const { blob, nome } = await baixarMaterialComoPdf(
+      const { blob, nome, totalMateriais, totalPaginas } =
+        await baixarInstituicaoComoZip(
           sessaoId,
-          id,
-          (p) =>
-            setProgresso({
-              ...p,
-              etapa: `Material ${i + 1} de ${ids.length}: ${p.etapa}`,
-            }),
+          filtro,
+          { incluirPngs },
+          setProgresso,
         );
-        zip.file(nome, blob);
-      }
-
-      const buffer = await zip.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: { level: 6 },
-      });
-      salvarArquivo(buffer, 'materiais_apmed.zip');
-      setMensagem(`${ids.length} material(is) baixados em um arquivo ZIP!`);
+      salvarArquivo(blob, nome);
+      setMensagem(
+        `${totalMateriais} material(is) de ${inst?.nome ?? filtro} (${totalPaginas} páginas) baixados!`,
+      );
       setBaixando('');
       setProgresso(null);
     } catch (e) {
@@ -246,83 +279,178 @@ export default function Pagina() {
         <div className="cartao">
           <h2>2. Escolha o que baixar</h2>
           <p className="ajuda">
-            Clique nas caixas para marcar os materiais. Depois vá para o passo 3
-            para baixar.
+            Escolha como quer baixar: material por material, uma seleção sua, ou
+            tudo de uma instituição de uma vez.
           </p>
 
           {mensagem && <div className="aviso sucesso">{mensagem}</div>}
           {erro && <div className="aviso erro">{erro}</div>}
 
-          {instituicoes.length > 1 && (
-            <div className="filtros">
+          {/* Modo de download */}
+          <div className="campo">
+            <label>Como você quer baixar?</label>
+            <div className="filtros" style={{ marginTop: 4 }}>
               <button
-                className={`chip ${filtro === '' ? 'ativo' : ''}`}
-                onClick={() => setFiltro('')}
+                className={`chip ${modo === 'individual' ? 'ativo' : ''}`}
+                onClick={() => setModo('individual')}
               >
-                Todas
+                Escolher material por material
               </button>
-              {instituicoes.map((inst) => (
+              <button
+                className={`chip ${modo === 'instituicao' ? 'ativo' : ''}`}
+                onClick={() => setModo('instituicao')}
+              >
+                Baixar uma instituição inteira
+              </button>
+            </div>
+          </div>
+
+          {/* Opção de PNGs */}
+          <label
+            className="opcao-checkbox"
+            style={{
+              display: 'flex',
+              gap: 10,
+              alignItems: 'flex-start',
+              padding: '12px 14px',
+              border: '2px solid #e2e8f0',
+              borderRadius: 10,
+              marginBottom: 18,
+              cursor: 'pointer',
+              background: incluirPngs ? '#eff6ff' : '#fff',
+              borderColor: incluirPngs ? '#1d4ed8' : '#e2e8f0',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={incluirPngs}
+              onChange={(e) => setIncluirPngs(e.target.checked)}
+              style={{ width: 18, height: 18, marginTop: 2, accentColor: '#1d4ed8' }}
+            />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
+                Incluir as imagens originais (PNG) junto com o PDF
+              </div>
+              <div className="dica" style={{ marginTop: 2 }}>
+                Cada material ganha uma pasta com as páginas em PNG de 2400px.
+                Deixa o ZIP bem maior, mas mantém a qualidade original.
+              </div>
+            </div>
+          </label>
+
+          {/* Filtro de instituição */}
+          {instituicoes.length > 1 && (
+            <div className="campo">
+              <label>Instituição</label>
+              <div className="filtros" style={{ marginTop: 4 }}>
                 <button
-                  key={inst}
-                  className={`chip ${filtro === inst ? 'ativo' : ''}`}
-                  onClick={() => setFiltro(inst)}
+                  className={`chip ${filtro === '' ? 'ativo' : ''}`}
+                  onClick={() => setFiltro('')}
                 >
-                  {inst.replace(/_/g, ' ')}
+                  Todas
                 </button>
-              ))}
+                {instituicoes.map((inst) => (
+                  <button
+                    key={inst.slug}
+                    className={`chip ${filtro === inst.slug ? 'ativo' : ''}`}
+                    onClick={() => setFiltro(inst.slug)}
+                    title={`${inst.total} material(is)`}
+                  >
+                    {inst.nome.replace(/_/g, ' ')} ({inst.total})
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
-          <div className="contador">
-            {visiveis.length} material(is) encontrado(s)
-          </div>
+          {modo === 'instituicao' ? (
+            <div className="aviso info">
+              <strong>Download de instituição inteira.</strong>
+              <br />
+              Selecione acima a instituição desejada e clique no botão abaixo.
+              Todos os materiais dela serão baixados em um único arquivo ZIP.
+              {filtro && (
+                <>
+                  <br />
+                  Instituição selecionada:{' '}
+                  <strong>
+                    {instituicoes.find((i) => i.slug === filtro)?.nome ?? filtro}
+                  </strong>{' '}
+                  (
+                  {instituicoes.find((i) => i.slug === filtro)?.total ?? 0}{' '}
+                  material(is))
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="contador">
+                {visiveis.length} material(is) encontrado(s)
+              </div>
 
-          <div className="lista">
-            {visiveis.map((m) => (
-              <label key={m.id} className={`item ${selecionados.has(m.id) ? 'selecionado' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={selecionados.has(m.id)}
-                  onChange={() => alternar(m.id)}
-                />
-                <div className="texto">
-                  <div className="titulo" title={m.titulo}>
-                    {m.titulo}
-                  </div>
-                  <div className="meta">
-                    <span className="tag">{m.instituicao}</span>
-                    {m.atualizadoEm && <span>Atualizado: {m.atualizadoEm}</span>}
-                  </div>
-                </div>
-              </label>
-            ))}
-          </div>
+              <div className="lista">
+                {visiveis.map((m) => (
+                  <label
+                    key={m.id}
+                    className={`item ${selecionados.has(m.id) ? 'selecionado' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selecionados.has(m.id)}
+                      onChange={() => alternar(m.id)}
+                    />
+                    <div className="texto">
+                      <div className="titulo" title={m.titulo}>
+                        {m.titulo}
+                      </div>
+                      <div className="meta">
+                        <span className="tag">{m.instituicao}</span>
+                        {m.atualizadoEm && <span>Atualizado: {m.atualizadoEm}</span>}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="linha-botoes">
+                <button
+                  className="botao secundario"
+                  onClick={() => setSelecionados(new Set(visiveis.map((m) => m.id)))}
+                >
+                  Marcar todos
+                </button>
+                <button
+                  className="botao secundario"
+                  onClick={() => setSelecionados(new Set())}
+                >
+                  Desmarcar
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="linha-botoes">
-            <button
-              className="botao secundario"
-              onClick={() => setSelecionados(new Set(visiveis.map((m) => m.id)))}
-            >
-              Marcar todos
-            </button>
-            <button
-              className="botao secundario"
-              onClick={() => setSelecionados(new Set())}
-            >
-              Desmarcar
-            </button>
-          </div>
-
-          <div className="linha-botoes">
-            <button
-              className="botao"
-              onClick={() => setEtapa(3)}
-              disabled={selecionados.size === 0}
-            >
-              {selecionados.size === 0
-                ? 'Marque pelo menos 1 material'
-                : `Ir para o passo 3 (${selecionados.size} selecionado${selecionados.size > 1 ? 's' : ''})`}
-            </button>
+            {modo === 'instituicao' ? (
+              <button
+                className="botao"
+                onClick={baixarInstituicao}
+                disabled={!filtro || !!baixando}
+              >
+                {filtro
+                  ? `📦 Baixar ${instituicoes.find((i) => i.slug === filtro)?.nome ?? filtro} inteira`
+                  : 'Escolha uma instituição acima'}
+              </button>
+            ) : (
+              <button
+                className="botao"
+                onClick={() => setEtapa(3)}
+                disabled={selecionados.size === 0}
+              >
+                {selecionados.size === 0
+                  ? 'Marque pelo menos 1 material'
+                  : `Ir para o passo 3 (${selecionados.size} selecionado${selecionados.size > 1 ? 's' : ''})`}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -402,7 +530,7 @@ export default function Pagina() {
             <button
               className="botao"
               style={{ flex: '0 0 auto', width: 'auto' }}
-              onClick={baixarTodos}
+              onClick={baixarSelecao}
               disabled={!!baixando || selecionados.size === 0}
             >
               📦 Baixar tudo em ZIP
