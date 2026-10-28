@@ -8,11 +8,11 @@
  *  - Descobrir o total de paginas (GET /provas/api/material_reader.php?material_id=N)
  *  - Baixar as paginas renderizadas (GET /provas/api/material_page.php?... -> PNG)
  *
- * SEGURANCA: a senha nunca e persistida em disco nem logada. A sessao vive
- * apenas em memoria (Map) e expira sozinha.
+ * SEGURANCA: a senha nunca e persistida em disco nem logada. A sessao e um
+ * token assinado que carrega apenas o cookie do portal e expira sozinho.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { assinarToken, idConta, lerToken } from './tokens';
 
 const BASE = process.env.APMED_BASE_URL || 'https://gestaoapmed.com.br/provas';
 
@@ -25,60 +25,30 @@ const UA =
  *
  * Em serverless, cada requisicao pode cair numa instancia diferente e um
  * `Map` em memoria nao sobrevive a isso. Por isso a sessao e um token
- * assinado (HMAC-SHA256) que carrega o PHPSESSID do APMED no payload.
- * O servidor valida a assinatura a cada uso, sem precisar de estado.
+ * assinado (HMAC-SHA256) que carrega o PHPSESSID do APMED no payload,
+ * junto com o id anonimo da conta (usado para ligar pagamentos e licencas).
  *
  * A senha nunca entra no token - apenas o cookie de sessao do APMED.
  */
 
-const SEGREDO =
-  process.env.APMED_SESSION_SECRET || 'apmed-dev-secret-troque-em-producao';
+const PROPOSITO_SESSAO = 'sessao.v2';
 
 /** Tempo maximo de vida de uma sessao (30 min). */
-const SESSAO_TTL_MS = 30 * 60 * 1000;
+export const SESSAO_TTL_MS = 30 * 60 * 1000;
 
-function b64url(buf: Buffer): string {
-  return buf
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function b64urlDecode(s: string): Buffer {
-  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64');
-}
-
-function assinar(payload: string): string {
-  return b64url(createHmac('sha256', SEGREDO).update(payload).digest());
-}
+type DadosSessao = { c: string; u: string; e: number };
 
 /** Gera um token de sessao assinado contendo o cookie do APMED. */
-function gerarTokenSessao(cookie: string): string {
+function gerarTokenSessao(cookie: string, conta: string): { token: string; exp: number } {
   const exp = Date.now() + SESSAO_TTL_MS;
-  const payload = b64url(Buffer.from(JSON.stringify({ c: cookie, e: exp })));
-  return `${payload}.${assinar(payload)}`;
+  return { token: assinarToken<DadosSessao>(PROPOSITO_SESSAO, { c: cookie, u: conta, e: exp }), exp };
 }
 
-/** Valida um token de sessao. Retorna o cookie ou null. */
-function validarTokenSessao(token: string): string | null {
-  if (!token || !token.includes('.')) return null;
-  const [payload, assinatura] = token.split('.');
-  if (!payload || !assinatura) return null;
-
-  const a = Buffer.from(assinatura);
-  const b = Buffer.from(assinar(payload));
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-
-  try {
-    const dados = JSON.parse(b64urlDecode(payload).toString('utf8'));
-    if (typeof dados.c !== 'string' || typeof dados.e !== 'number') return null;
-    if (Date.now() > dados.e) return null;
-    return dados.c;
-  } catch {
-    return null;
-  }
+/** Valida um token de sessao. */
+function validarTokenSessao(token: string): DadosSessao | null {
+  const dados = lerToken<DadosSessao>(PROPOSITO_SESSAO, token);
+  if (!dados || typeof dados.c !== 'string' || typeof dados.u !== 'string') return null;
+  return dados;
 }
 
 /** Tempo maximo de uma requisicao ao APMED. */
@@ -87,13 +57,6 @@ const TIMEOUT_MS = Number(process.env.APMED_TIMEOUT_MS || 25000);
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
 /* ------------------------------------------------------------------ */
-
-export function gerarId(): string {
-  return (
-    Math.random().toString(36).slice(2, 12) +
-    Math.random().toString(36).slice(2, 12)
-  );
-}
 
 /** Remove acentos, normaliza caixa e separadores, para comparar nomes. */
 export function normalizar(texto: string): string {
@@ -156,6 +119,8 @@ async function req(url: string, opts: OpcoesFetch = {}): Promise<Response> {
 export type Sessao = {
   id: string;
   cookie: string;
+  /** Id anonimo e estavel da conta (HMAC do e-mail). */
+  conta: string;
   expiraEm: number;
 };
 
@@ -210,19 +175,17 @@ export function criarSessao(email: string, senha: string): Promise<Sessao> {
       }
     }
 
-    return {
-      id: gerarTokenSessao(cookie),
-      cookie,
-      expiraEm: Date.now() + SESSAO_TTL_MS,
-    };
+    const conta = idConta(email);
+    const { token, exp } = gerarTokenSessao(cookie, conta);
+    return { id: token, cookie, conta, expiraEm: exp };
   })();
 }
 
 /** Recupera o cookie a partir do token assinado. */
 export function obterSessao(id: string): Sessao | null {
-  const cookie = validarTokenSessao(id);
-  if (!cookie) return null;
-  return { id, cookie, expiraEm: Date.now() + SESSAO_TTL_MS };
+  const dados = validarTokenSessao(id);
+  if (!dados) return null;
+  return { id, cookie: dados.c, conta: dados.u, expiraEm: dados.e };
 }
 
 /**
@@ -230,8 +193,10 @@ export function obterSessao(id: string): Sessao | null {
  * valido ate expirar, mas o PHPSESSID ja nao da mais acesso ao portal.
  */
 export async function destruirSessao(id: string): Promise<void> {
-  const cookie = validarTokenSessao(id);
-  if (!cookie) return;
+  const dados = validarTokenSessao(id);
+  if (!dados) return;
+  const cookie = dados.c;
+  cacheMateriais.delete(cookie);
   try {
     await req(`${BASE}/logout.php`, {
       method: 'GET',
@@ -324,9 +289,9 @@ const PALAVRAS_INSTITUICAO = [
   'unicamp', 'usp-rp', 'usp-sp', 'usp rp', 'usp sp', 'hrpp', 'sus-sp',
   'sus sp', 'famerp', 'famema', 'fmabc', 'fmj', 'scmrp', 'scmsp', 'iamspe',
   'unifesp', 'puc-sp', 'puc-pr', 'puc sp', 'ufcspa', 'santa casa de limeira',
-  'banco de olhos', 'uerj', 'uel', 'uema', 'uem', 'unesp', 'unitaú', 'unitaú',
-  'uninove', 'amrigs', 'psu-es', 'psu-mg', 'psu-go', 'hcor', 'hsL', 'hsl',
-  'hcor', 'unitaú', 'fao', 'hosp', 'hc', 'sao paulo', 'são paulo',
+  'banco de olhos', 'uerj', 'uema', 'uem', 'uel', 'unesp', 'unitau',
+  'uninove', 'amrigs', 'psu-es', 'psu-mg', 'psu-go', 'hcor', 'hsl',
+  'fao', 'hosp', 'hc', 'sao paulo',
 ];
 
 export function detectarInstituicao(
@@ -365,7 +330,31 @@ export function gerarSlug(texto: string): string {
   return normalizar(texto).replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || 'outros';
 }
 
-export async function listarMateriais(cookie: string): Promise<Material[]> {
+/**
+ * Cache curto da lista de materiais por sessao. Cada parte do download
+ * confere se o material pertence a conta; sem o cache, isso significaria
+ * baixar o HTML da lista dezenas de vezes por material.
+ */
+const cacheMateriais = new Map<string, { quando: number; materiais: Material[] }>();
+const CACHE_MATERIAIS_MS = 2 * 60 * 1000;
+
+export async function listarMateriais(cookie: string, usarCache = true): Promise<Material[]> {
+  const agora = Date.now();
+  const emCache = cacheMateriais.get(cookie);
+  if (usarCache && emCache && agora - emCache.quando < CACHE_MATERIAIS_MS) {
+    return emCache.materiais;
+  }
+  const materiais = await buscarMateriais(cookie);
+  cacheMateriais.set(cookie, { quando: agora, materiais });
+  if (cacheMateriais.size > 500) {
+    for (const [k, v] of cacheMateriais) {
+      if (agora - v.quando >= CACHE_MATERIAIS_MS) cacheMateriais.delete(k);
+    }
+  }
+  return materiais;
+}
+
+async function buscarMateriais(cookie: string): Promise<Material[]> {
   const res = await req(`${BASE}/aluno/materiais.php`, {
     headers: {
       Referer: `${BASE}/aluno/dashboard.php`,
@@ -400,10 +389,25 @@ export async function listarMateriais(cookie: string): Promise<Material[]> {
 
 export type TokenLeitura = { exp: number; token: string };
 
+/** Tokens de leitura reaproveitados enquanto valem (evita 1 chamada por parte). */
+const cacheTokens = new Map<string, TokenLeitura>();
+
 export async function obterTokenLeitura(
   cookie: string,
   materialId: number,
 ): Promise<TokenLeitura> {
+  const chave = `${cookie}:${materialId}`;
+  const emCache = cacheTokens.get(chave);
+  // `exp` vem em segundos (unix). Folga de 60s para nao usar token vencendo.
+  if (emCache && emCache.exp * 1000 - Date.now() > 60_000) return emCache;
+
+  const token = await buscarTokenLeitura(cookie, materialId);
+  cacheTokens.set(chave, token);
+  if (cacheTokens.size > 2000) cacheTokens.clear();
+  return token;
+}
+
+async function buscarTokenLeitura(cookie: string, materialId: number): Promise<TokenLeitura> {
   const res = await req(
     `${BASE}/aluno/material_visualizar.php?id=${materialId}&reader_token=1`,
     {
@@ -504,6 +508,7 @@ export async function paginaExiste(
   } catch {
     existe = false;
   }
+  if (cachePaginas.size > 20000) cachePaginas.clear();
   cachePaginas.set(key, existe);
   return existe;
 }
@@ -573,12 +578,37 @@ export async function contarPaginas(
   return ultimaExistente;
 }
 
+/**
+ * Baixa uma pagina, com ate 3 tentativas para falhas temporarias
+ * (rede, timeout, HTTP 5xx/429). Erros 4xx nao sao repetidos.
+ */
 export async function baixarPagina(
   cookie: string,
   materialId: number,
   pagina: number,
   token: TokenLeitura,
   largura = 2400,
+): Promise<Buffer> {
+  let ultimoErro: unknown;
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    try {
+      return await baixarPaginaUmaVez(cookie, materialId, pagina, token, largura);
+    } catch (e) {
+      ultimoErro = e;
+      const definitivo = e instanceof ApmedError && e.status >= 400 && e.status < 500;
+      if (definitivo) throw e;
+      await new Promise((r) => setTimeout(r, 400 * 2 ** tentativa));
+    }
+  }
+  throw ultimoErro;
+}
+
+async function baixarPaginaUmaVez(
+  cookie: string,
+  materialId: number,
+  pagina: number,
+  token: TokenLeitura,
+  largura: number,
 ): Promise<Buffer> {
   const url =
     `${BASE}/api/material_page.php?material_id=${materialId}&page=${pagina}` +
@@ -593,7 +623,11 @@ export async function baixarPagina(
   });
 
   if (!res.ok) {
-    throw new ApmedError(`Falha ao baixar a pagina ${pagina} (HTTP ${res.status}).`, 502);
+    const definitivo = res.status === 404 || res.status === 403;
+    throw new ApmedError(
+      `Falha ao baixar a pagina ${pagina} (HTTP ${res.status}).`,
+      definitivo ? res.status : 502,
+    );
   }
   const buffer = Buffer.from(await res.arrayBuffer());
   if (buffer.length < 512) {
