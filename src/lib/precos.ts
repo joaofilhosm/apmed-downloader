@@ -29,7 +29,7 @@ export const FAIXAS: Faixa[] = [
   { minimo: 2, unitario: 1350, rotulo: '2 materiais' },
   { minimo: 3, unitario: 1200, rotulo: '3 a 4 materiais' },
   { minimo: 5, unitario: 1050, rotulo: '5 a 9 materiais' },
-  { minimo: 10, unitario: 900, rotulo: '10 ou mais' },
+  { minimo: 10, unitario: 950, rotulo: '10 ou mais' },
 ];
 
 /** Limite de materiais por pedido (protege contra abuso e erros de clique). */

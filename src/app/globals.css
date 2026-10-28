@@ -422,7 +422,7 @@ img, svg { display: block; max-width: 100%; }
 .material .capa .ano { position: absolute; top: 10px; right: 12px; font-size: 0.75rem; opacity: 0.9; z-index: 1; }
 .material h3 { font-size: 0.98rem; font-weight: 700; }
 .material .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.78rem; color: var(--muted); }
-.material .rodape { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+.material .rodape { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; flex-wrap: wrap; }
 .preco { font-weight: 800; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
 .preco s { color: var(--muted); font-weight: 500; font-size: 0.82rem; margin-right: 6px; }
 
@@ -511,7 +511,8 @@ mark { background: color-mix(in srgb, #facc15 45%, transparent); color: inherit;
 .modal-corpo { padding: 18px 22px 22px; }
 
 /* ---------------------------------------------------------------- checkout */
-.pix-area { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.pix-area { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+.pix-area > div { min-width: 0; }
 .qr {
   width: 220px; height: 220px; border-radius: 16px; background: #fff; padding: 10px;
   border: 1px solid var(--border); display: grid; place-items: center; position: relative;
@@ -573,7 +574,7 @@ mark { background: color-mix(in srgb, #facc15 45%, transparent); color: inherit;
 .barra-flutuante small { display: block; opacity: 0.75; font-size: 0.75rem; }
 
 /* ---------------------------------------------------------------- toasts */
-.toasts { position: fixed; bottom: 18px; right: 18px; z-index: 90; display: flex; flex-direction: column; gap: 8px; width: min(380px, calc(100vw - 36px)); }
+.toasts { position: fixed; top: 76px; right: 18px; z-index: 90; display: flex; flex-direction: column; gap: 8px; width: min(380px, calc(100vw - 36px)); }
 .toast {
   display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px;
   background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg);
@@ -625,7 +626,7 @@ mark { background: color-mix(in srgb, #facc15 45%, transparent); color: inherit;
   .abas { display: none; }
   .so-mobile { display: flex; }
   .barra-flutuante { display: flex; }
-  .toasts { bottom: 90px; }
+  .toasts { top: auto; bottom: 90px; }
 }
 @media (max-width: 560px) {
   .conteudo { padding: 16px 14px 120px; }
@@ -634,7 +635,10 @@ mark { background: color-mix(in srgb, #facc15 45%, transparent); color: inherit;
   .passos-hero { grid-template-columns: 1fr; }
   .pix-area { grid-template-columns: 1fr; justify-items: center; }
   .login-form { padding: 20px; }
-  .barra-ferramentas { top: 60px; }
+  .barra-ferramentas { position: static; }
+  .barra-ferramentas .seletor { flex: 1 1 40%; min-width: 0; }
+  .marca > span:last-child { display: none; }
+  .icone-btn { width: 36px; height: 36px; }
   .conta-chip .tempo { display: none; }
   .grade { grid-template-columns: 1fr; }
 }

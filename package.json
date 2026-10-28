@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/resolver.mjs --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "mock:apmed": "node scripts/mock-apmed.mjs"
   },
   "dependencies": {
     "jszip": "3.10.1",
@@ -24,6 +27,6 @@
     "typescript": "5.5.4"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.18.0"
   }
 }
