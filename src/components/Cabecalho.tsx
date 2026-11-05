@@ -52,9 +52,18 @@ export function Cabecalho({
   }, [qtdCarrinho]);
 
   const restante = expiraEm - agora;
-  const escuroAgora =
-    tema === 'escuro' ||
-    (tema === 'sistema' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+  // Lido depois da montagem: no servidor nao existe preferencia do sistema,
+  // e decidir o icone durante a renderizacao gerava diferenca na hidratacao.
+  const [sistemaEscuro, setSistemaEscuro] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    setSistemaEscuro(mq.matches);
+    const mudar = (e: MediaQueryListEvent) => setSistemaEscuro(e.matches);
+    mq.addEventListener('change', mudar);
+    return () => mq.removeEventListener('change', mudar);
+  }, []);
+  const escuroAgora = tema === 'escuro' || (tema === 'sistema' && sistemaEscuro);
 
   return (
     <header className="topo">
@@ -63,19 +72,16 @@ export function Cabecalho({
           <span className="marca-logo">
             <Icone nome="livro" tamanho={18} />
           </span>
-          <span>
-            APMED Downloader
-            <small>Materiais em PDF</small>
-          </span>
+          <span>APMED Downloader</span>
         </a>
 
         {email && (
           <nav className="abas" aria-label="Seções">
             <button className="aba" aria-current={aba === 'catalogo' ? 'page' : undefined} onClick={() => aoMudarAba('catalogo')}>
-              <Icone nome="livro" tamanho={16} /> Catálogo
+              Materiais
             </button>
             <button className="aba" aria-current={aba === 'downloads' ? 'page' : undefined} onClick={() => aoMudarAba('downloads')}>
-              <Icone nome="download" tamanho={16} /> Meus downloads
+              Meus downloads
               {qtdLiberados > 0 && <span className="contagem">{qtdLiberados}</span>}
             </button>
           </nav>
@@ -105,7 +111,7 @@ export function Cabecalho({
           </button>
           {email && (
             <>
-              <button className="icone-btn" onClick={aoAbrirCarrinho} aria-label={`Abrir carrinho (${qtdCarrinho} itens)`}>
+              <button className="icone-btn so-compacto" onClick={aoAbrirCarrinho} aria-label={`Abrir carrinho (${qtdCarrinho} itens)`}>
                 <Icone nome="carrinho" />
                 {qtdCarrinho > 0 && <span className={`badge ${pulsar ? 'pulsar' : ''}`}>{qtdCarrinho}</span>}
               </button>

@@ -4,9 +4,24 @@ import { useEffect, useRef, useState } from 'react';
 import { Icone } from './Icone';
 import { TabelaPrecos } from './TabelaPrecos';
 import { chaves, gravar, ler } from '@/lib/cliente';
-import { FAIXAS, PRECO_BASE } from '@/lib/precos';
+import { FAIXAS, formatarReais } from '@/lib/precos';
 
-const DESCONTO_MAXIMO = Math.round((1 - FAIXAS[FAIXAS.length - 1].unitario / PRECO_BASE) * 100);
+// Lombadas da estante: bancas reais do portal, alturas e cores variadas.
+const ESTANTE = [
+  { nome: 'USP-SP', altura: 188, cor: '#3a5a8c' },
+  { nome: 'UNICAMP', altura: 164, cor: '#2e6b5e' },
+  { nome: 'SUS-SP', altura: 196, cor: '#9c4335', grifada: true },
+  { nome: 'HSL', altura: 150, cor: '#14262b' },
+  { nome: 'UNIFESP', altura: 178, cor: '#7a4e8c' },
+  { nome: 'PSU-MG', altura: 158, cor: '#806418' },
+  { nome: 'SCMSP', altura: 184, cor: '#2f7f95' },
+  { nome: 'ENAMED', altura: 200, cor: '#5c6b2e', grifada: true },
+  { nome: 'AMRIGS', altura: 166, cor: '#8a3b5c' },
+  { nome: 'IAMSPE', altura: 176, cor: '#3a5a8c' },
+  { nome: 'HCPA', altura: 154, cor: '#2e6b5e' },
+  { nome: 'UERJ', altura: 182, cor: '#9c4335' },
+  { nome: 'FMABC', altura: 170, cor: '#806418' },
+];
 
 const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -56,58 +71,39 @@ export function TelaLogin({
   return (
     <section className="login">
       <div className="login-hero">
-        <span className="selo">
-          <span className="ponto" /> Pagamento via Pix, liberação na hora
-        </span>
-        <h1>
-          Seus materiais do APMED em <span className="grad">PDF</span>, prontos para estudar offline.
-        </h1>
+        <h1>As bíblias das suas bancas, em PDF, para estudar onde quiser.</h1>
         <p>
-          Entre com a sua conta, escolha os materiais, pague com Pix e baixe. Quanto mais
-          materiais no mesmo pedido, menor o preço de cada um.
+          Entre com a conta do portal APMED, separe as bancas que vai prestar e pague com Pix. O PDF
+          completo de cada material fica pronto para baixar assim que o pagamento cai.
         </p>
 
-        <div className="passos-hero">
-          <div className="passo-hero">
-            <div className="num">1</div>
-            <strong>Escolha</strong>
-            <span>Monte seu carrinho com os materiais da sua conta.</span>
-          </div>
-          <div className="passo-hero">
-            <div className="num">2</div>
-            <strong>Pague com Pix</strong>
-            <span>QR Code ou copia e cola, confirmação automática.</span>
-          </div>
-          <div className="passo-hero">
-            <div className="num">3</div>
-            <strong>Baixe</strong>
-            <span>PDF completo, ou ZIP com tudo de uma vez.</span>
-          </div>
+        <div className="estante" aria-hidden>
+          {ESTANTE.map((l) => (
+            <span
+              key={l.nome}
+              className={`lombada ${l.grifada ? 'grifada' : ''}`}
+              style={{ height: l.altura, background: l.cor }}
+            >
+              {l.nome}
+            </span>
+          ))}
         </div>
 
-        <div className="cartao cartao-corpo mt-24">
-          <div className="linha entre mb-12">
-            <strong>Preço por material</strong>
-            <span className="etiqueta sucesso">até {DESCONTO_MAXIMO}% off</span>
-          </div>
-          <TabelaPrecos quantidade={0} compacta />
-        </div>
-
-        <div className="confianca">
-          <span>
-            <Icone nome="cadeado" tamanho={15} /> Senha nunca é gravada
-          </span>
-          <span>
-            <Icone nome="escudo" tamanho={15} /> Pagamento pelo Mercado Pago
-          </span>
-          <span>
-            <Icone nome="raio" tamanho={15} /> PDF montado no seu navegador
-          </span>
-        </div>
+        <ol className="como-funciona">
+          <li>
+            <strong>Entre</strong> com o e-mail e a senha do APMED.
+          </li>
+          <li>
+            <strong>Separe</strong> as bancas que quer baixar.
+          </li>
+          <li>
+            <strong>Pague</strong> com Pix e baixe os PDFs.
+          </li>
+        </ol>
       </div>
 
-      <form className="cartao login-form" onSubmit={enviar} noValidate>
-        <h2>Entrar com a conta APMED</h2>
+      <form className="login-form" onSubmit={enviar} noValidate>
+        <h2>Entrar</h2>
         <p>Use o mesmo e-mail e senha do portal gestaoapmed.com.br.</p>
 
         {erro && (
@@ -191,15 +187,23 @@ export function TelaLogin({
             </>
           ) : (
             <>
-              Entrar e ver meus materiais <Icone nome="sair" tamanho={16} />
+              Entrar e ver meus materiais
             </>
           )}
         </button>
 
         <p className="dica mt-12">
-          A senha só é usada para abrir a sessão no portal e nunca é armazenada. A sessão expira
-          sozinha em 30 minutos.
+          A senha só abre a sessão no portal e nunca é guardada. A sessão termina sozinha em 30 minutos.
         </p>
+
+        <div className="preco-login">
+          <h3>Preço de cada material</h3>
+          <TabelaPrecos quantidade={0} />
+          <p className="dica mt-12">
+            De {formatarReais(FAIXAS[0].unitario)} com um material a {formatarReais(FAIXAS[FAIXAS.length - 1].unitario)} a
+            partir de {FAIXAS[FAIXAS.length - 1].minimo} no mesmo pedido.
+          </p>
+        </div>
       </form>
     </section>
   );

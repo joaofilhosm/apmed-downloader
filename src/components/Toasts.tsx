@@ -29,8 +29,8 @@ export function ProvedorToasts({ children }: { children: React.ReactNode }) {
   const avisar = useCallback<Api>(
     (texto, tipo = 'info', duracaoMs = 4500) => {
       const id = proximoId.current++;
-      // Nao empilha a mesma mensagem duas vezes; no maximo 4 na tela.
-      setLista((l) => [...l.filter((t) => t.texto !== texto), { id, tipo, texto }].slice(-4));
+      // Nao empilha a mesma mensagem duas vezes; no maximo 2 na tela.
+      setLista((l) => [...l.filter((t) => t.texto !== texto), { id, tipo, texto }].slice(-2));
       setTimeout(() => fechar(id), duracaoMs);
     },
     [fechar],

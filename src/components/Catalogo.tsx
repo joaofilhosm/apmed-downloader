@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Icone } from './Icone';
+import { useDialogo } from './Modal';
 import {
   chaves,
   combina,
@@ -19,7 +20,6 @@ import {
 import { calcularOrcamento, formatarReais, PRECO_BASE } from '@/lib/precos';
 
 type Ordem = 'titulo' | 'recentes' | 'instituicao' | 'id';
-type Vista = 'grade' | 'lista';
 type Situacao = 'todos' | 'disponiveis' | 'comprados';
 
 /** Destaca os termos da busca dentro do texto. */
@@ -77,18 +77,14 @@ export function Catalogo({
   const [ano, setAno] = useState('');
   const [situacao, setSituacao] = useState<Situacao>('todos');
   const [ordem, setOrdem] = useState<Ordem>('titulo');
-  const [vista, setVista] = useState<Vista>('grade');
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const buscaRef = useRef<HTMLInputElement>(null);
+  const refIndice = useDialogo(filtrosAbertos, () => setFiltrosAbertos(false));
 
-  // Preferencias de visualizacao persistidas.
-  useEffect(() => {
-    setVista(ler<Vista>(chaves.vista, 'grade'));
-    setOrdem(ler<Ordem>(chaves.ordem, 'titulo'));
-  }, []);
-  useEffect(() => gravar(chaves.vista, vista), [vista]);
+  useEffect(() => setOrdem(ler<Ordem>(chaves.ordem, 'titulo')), []);
   useEffect(() => gravar(chaves.ordem, ordem), [ordem]);
 
-  // Atalho "/" foca a busca; Esc limpa.
+  // Atalho "/" foca a busca.
   useEffect(() => {
     function tecla(e: KeyboardEvent) {
       const alvo = e.target as HTMLElement;
@@ -107,7 +103,7 @@ export function Catalogo({
     for (const m of materiais) {
       const atual = mapa.get(m.slug);
       if (atual) atual.total += 1;
-      else mapa.set(m.slug, { slug: m.slug, nome: m.instituicao.replace(/_/g, ' '), total: 1 });
+      else mapa.set(m.slug, { slug: m.slug, nome: m.instituicao, total: 1 });
     }
     return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   }, [materiais]);
@@ -128,7 +124,7 @@ export function Catalogo({
         combina(m, buscaAdiada),
     );
     const cmp: Record<Ordem, (a: Material, b: Material) => number> = {
-      titulo: (a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR', { numeric: true }),
+      titulo: (a, b) => a.instituicao.localeCompare(b.instituicao, 'pt-BR', { numeric: true }),
       recentes: (a, b) => dataPortal(b.atualizadoEm) - dataPortal(a.atualizadoEm) || b.id - a.id,
       instituicao: (a, b) =>
         a.instituicao.localeCompare(b.instituicao, 'pt-BR') || a.titulo.localeCompare(b.titulo, 'pt-BR'),
@@ -141,7 +137,9 @@ export function Catalogo({
   const todosNoCarrinho =
     disponiveisVisiveis.length > 0 && disponiveisVisiveis.every((m) => noCarrinho.has(m.id));
   const filtrando = !!(busca || instituicao || ano || situacao !== 'todos');
-  const unitarioAtual = calcularOrcamento(Math.max(1, noCarrinho.size)).unitario;
+  const qtdFiltros = (instituicao ? 1 : 0) + (ano ? 1 : 0) + (situacao !== 'todos' ? 1 : 0);
+  const unitarioAtual = calcularOrcamento(Math.max(1, noCarrinho.size + 1)).unitario;
+  const nomeInstituicao = instituicoes.find((i) => i.slug === instituicao)?.nome;
 
   function limparFiltros() {
     setBusca('');
@@ -150,219 +148,240 @@ export function Catalogo({
     setSituacao('todos');
   }
 
+  function escolherBanca(slug: string) {
+    setInstituicao(instituicao === slug ? '' : slug);
+    setFiltrosAbertos(false);
+  }
+
   return (
-    <section aria-labelledby="titulo-catalogo">
-      <div className="secao-titulo">
-        <div>
-          <h1 id="titulo-catalogo">Seus materiais</h1>
-          <p>
-            {plural(materiais.length, 'material disponível', 'materiais disponíveis')} na sua conta
-            {liberados.size > 0 && <> · {plural(liberados.size, 'já liberado', 'já liberados')}</>}
-          </p>
-        </div>
-        <div className="linha">
-          {liberados.size > 0 && (
-            <button className="btn btn-secundario btn-pequeno" onClick={aoIrParaDownloads}>
-              <Icone nome="download" tamanho={16} /> Meus downloads
+    <>
+      {filtrosAbertos && <div className="veu" onClick={() => setFiltrosAbertos(false)} />}
+      <aside
+        className={`indice ${filtrosAbertos ? 'aberto' : ''}`}
+        aria-label="Filtros"
+        ref={refIndice}
+        role={filtrosAbertos ? 'dialog' : undefined}
+        aria-modal={filtrosAbertos || undefined}
+      >
+        {filtrosAbertos && (
+          <div className="linha entre">
+            <strong>Filtros</strong>
+            <button className="icone-btn" onClick={() => setFiltrosAbertos(false)} aria-label="Fechar filtros">
+              <Icone nome="x" />
             </button>
-          )}
-          <button
-            className="btn btn-fantasma btn-pequeno"
-            onClick={aoRecarregar}
-            disabled={carregando}
-            title="Buscar a lista de novo no portal"
-          >
-            <Icone nome="recarregar" tamanho={16} /> Atualizar
-          </button>
-        </div>
-      </div>
-
-      <div className="cartao barra-ferramentas">
-        <div className="entrada-grupo busca">
-          <Icone nome="busca" className="icone-esq" />
-          <input
-            ref={buscaRef}
-            className="entrada com-icone"
-            type="search"
-            placeholder="Buscar por nome, instituição ou ano..."
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            onKeyDown={(e) => e.key === 'Escape' && setBusca('')}
-            aria-label="Buscar materiais"
-          />
-          {!busca && <kbd className="atalho" aria-hidden>/</kbd>}
-        </div>
-        {anos.length > 1 && (
-          <select className="seletor" value={ano} onChange={(e) => setAno(e.target.value)} aria-label="Filtrar por ano">
-            <option value="">Todos os anos</option>
-            {anos.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
+          </div>
         )}
-        <select
-          className="seletor"
-          value={situacao}
-          onChange={(e) => setSituacao(e.target.value as Situacao)}
-          aria-label="Filtrar por situação"
-        >
-          <option value="todos">Todos</option>
-          <option value="disponiveis">Ainda não comprados</option>
-          <option value="comprados">Já liberados</option>
-        </select>
-        <select className="seletor" value={ordem} onChange={(e) => setOrdem(e.target.value as Ordem)} aria-label="Ordenar">
-          <option value="titulo">Ordem alfabética</option>
-          <option value="recentes">Atualizados recentemente</option>
-          <option value="instituicao">Por instituição</option>
-          <option value="id">Ordem do portal</option>
-        </select>
-        <div className="segmentado" role="group" aria-label="Modo de exibição">
-          <button aria-pressed={vista === 'grade'} onClick={() => setVista('grade')} title="Grade">
-            <Icone nome="grade" tamanho={16} />
-            <span className="sr-only">Grade</span>
-          </button>
-          <button aria-pressed={vista === 'lista'} onClick={() => setVista('lista')} title="Lista">
-            <Icone nome="lista" tamanho={16} />
-            <span className="sr-only">Lista</span>
-          </button>
-        </div>
-      </div>
-
-      {instituicoes.length > 1 && (
-        <div className="chips" role="group" aria-label="Filtrar por instituição">
-          <button className="chip" aria-pressed={instituicao === ''} onClick={() => setInstituicao('')}>
-            Todas <span className="n">{materiais.length}</span>
-          </button>
-          {instituicoes.map((i) => (
-            <button
-              key={i.slug}
-              className="chip"
-              aria-pressed={instituicao === i.slug}
-              onClick={() => setInstituicao(instituicao === i.slug ? '' : i.slug)}
-            >
-              {i.nome} <span className="n">{i.total}</span>
+        <div className="grupo">
+          <span className="rotulo">Mostrar</span>
+          <div className="segmentado" role="group" aria-label="Situação">
+            <button aria-pressed={situacao === 'todos'} onClick={() => setSituacao('todos')}>
+              Todos
             </button>
-          ))}
+            <button aria-pressed={situacao === 'disponiveis'} onClick={() => setSituacao('disponiveis')}>
+              A comprar
+            </button>
+            <button aria-pressed={situacao === 'comprados'} onClick={() => setSituacao('comprados')}>
+              Pagos
+            </button>
+          </div>
         </div>
-      )}
+        <div className="seletores">
+          {anos.length > 1 && (
+            <select className="seletor" value={ano} onChange={(e) => setAno(e.target.value)} aria-label="Ano">
+              <option value="">Todos os anos</option>
+              {anos.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          )}
+          <select className="seletor" value={ordem} onChange={(e) => setOrdem(e.target.value as Ordem)} aria-label="Ordenar">
+            <option value="titulo">A a Z</option>
+            <option value="recentes">Mais recentes</option>
+            <option value="id">Ordem do portal</option>
+          </select>
+        </div>
+        <div className="grupo" style={{ flex: 1, minHeight: 0 }}>
+          <span className="rotulo">Bancas ({instituicoes.length})</span>
+          <ul className="lista-bancas">
+            <li>
+              <button aria-pressed={instituicao === ''} onClick={() => escolherBanca('')}>
+                <span className="cor" style={{ background: 'var(--linha-forte)' }} />
+                <span className="nome">Todas as bancas</span>
+                <span className="n">{materiais.length}</span>
+              </button>
+            </li>
+            {instituicoes.map((i) => (
+              <li key={i.slug}>
+                <button aria-pressed={instituicao === i.slug} onClick={() => escolherBanca(i.slug)}>
+                  <span className="cor" style={{ background: corDe(i.slug) }} />
+                  <span className="nome" title={i.nome}>
+                    {i.nome}
+                  </span>
+                  <span className="n">{i.total}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
 
-      <div className="resumo-lista">
-        <span aria-live="polite">
-          {plural(visiveis.length, 'material encontrado', 'materiais encontrados')}
-          {filtrando && (
-            <>
-              {' · '}
+      <section aria-labelledby="titulo-catalogo" style={{ minWidth: 0 }}>
+        <div className="cabeca-secao">
+          <div>
+            <h1 id="titulo-catalogo">{nomeInstituicao ?? 'Seus materiais'}</h1>
+            <p>
+              {plural(materiais.length, 'material na sua conta', 'materiais na sua conta')}
+              {liberados.size > 0 && <>, {plural(liberados.size, 'já pago', 'já pagos')}</>}
+            </p>
+          </div>
+          <div className="linha">
+            {liberados.size > 0 && (
+              <button className="btn btn-secundario btn-pequeno" onClick={aoIrParaDownloads}>
+                <Icone nome="download" tamanho={16} /> <span className="texto-longo">Meus downloads</span>
+              </button>
+            )}
+            <button
+              className="btn btn-fantasma btn-pequeno"
+              onClick={aoRecarregar}
+              disabled={carregando}
+              title="Buscar a lista de novo no portal"
+            >
+              <Icone nome="recarregar" tamanho={16} /> <span className="texto-longo">Atualizar</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="busca-linha">
+          <div className="entrada-grupo busca">
+            <Icone nome="busca" className="icone-esq" />
+            <input
+              ref={buscaRef}
+              className="entrada com-icone"
+              type="search"
+              placeholder="Buscar banca, hospital ou ano"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              onKeyDown={(e) => e.key === 'Escape' && setBusca('')}
+              aria-label="Buscar materiais"
+            />
+            {!busca && (
+              <kbd className="atalho" aria-hidden>
+                /
+              </kbd>
+            )}
+          </div>
+          <button className="btn btn-secundario botao-filtros" onClick={() => setFiltrosAbertos(true)}>
+            <Icone nome="lista" tamanho={16} /> Filtros{qtdFiltros > 0 && ` (${qtdFiltros})`}
+          </button>
+        </div>
+
+        <div className="resumo-lista">
+          <span aria-live="polite">
+            {plural(visiveis.length, 'material', 'materiais')}
+            {filtrando && (
               <button className="btn btn-fantasma btn-pequeno" onClick={limparFiltros}>
                 Limpar filtros
               </button>
-            </>
+            )}
+          </span>
+          {disponiveisVisiveis.length > 1 && (
+            <div className="acoes">
+              {todosNoCarrinho ? (
+                <button
+                  className="btn btn-secundario btn-pequeno"
+                  onClick={() => aoRemoverVarios(disponiveisVisiveis.map((m) => m.id))}
+                >
+                  Tirar todos do pedido
+                </button>
+              ) : (
+                <button
+                  className="btn btn-secundario btn-pequeno"
+                  onClick={() => aoAdicionarVarios(disponiveisVisiveis.map((m) => m.id))}
+                >
+                  <Icone nome="mais" tamanho={14} />
+                  {instituicao ? 'Adicionar todos desta banca' : `Adicionar os ${disponiveisVisiveis.length}`}
+                </button>
+              )}
+            </div>
           )}
-        </span>
-        {disponiveisVisiveis.length > 0 && (
-          <div className="acoes">
-            {todosNoCarrinho ? (
-              <button
-                className="btn btn-secundario btn-pequeno"
-                onClick={() => aoRemoverVarios(disponiveisVisiveis.map((m) => m.id))}
-              >
-                <Icone nome="menos" tamanho={14} /> Tirar estes do carrinho
-              </button>
-            ) : (
-              <button
-                className="btn btn-secundario btn-pequeno"
-                onClick={() => aoAdicionarVarios(disponiveisVisiveis.map((m) => m.id))}
-              >
-                <Icone nome="mais" tamanho={14} />
-                {instituicao
-                  ? ` Adicionar toda a ${instituicoes.find((i) => i.slug === instituicao)?.nome ?? 'instituição'}`
-                  : ` Adicionar os ${disponiveisVisiveis.length} visíveis`}
+        </div>
+
+        {carregando && materiais.length === 0 ? (
+          <div className="fichas" aria-busy="true">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="esqueleto" />
+            ))}
+          </div>
+        ) : visiveis.length === 0 ? (
+          <div className="fichas vazio">
+            <div className="icone-grande">
+              <Icone nome="busca" tamanho={24} />
+            </div>
+            <h3>Nenhum material com esses filtros</h3>
+            <p>Tente outro termo ou limpe os filtros.</p>
+            {filtrando && (
+              <button className="btn btn-secundario" onClick={limparFiltros}>
+                Limpar filtros
               </button>
             )}
           </div>
-        )}
-      </div>
-
-      {carregando && materiais.length === 0 ? (
-        <div className="grade" aria-busy="true">
-          {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="esqueleto" />
-          ))}
-        </div>
-      ) : visiveis.length === 0 ? (
-        <div className="cartao vazio">
-          <div className="icone-grande">
-            <Icone nome="busca" tamanho={28} />
-          </div>
-          <h3>Nada encontrado</h3>
-          <p>Tente outra palavra ou limpe os filtros.</p>
-          {filtrando && (
-            <button className="btn btn-secundario mt-16" onClick={limparFiltros}>
-              Limpar filtros
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className={`grade ${vista === 'lista' ? 'lista' : ''}`}>
-          {visiveis.map((m) => {
-            const expira = liberados.get(m.id);
-            const no = noCarrinho.has(m.id);
-            const anoM = extrairAno(m.titulo);
-            return (
-              <article
-                key={m.id}
-                className={`material ${no ? 'no-carrinho' : ''} ${expira ? 'comprado' : ''}`}
-              >
-                <div className="capa" style={{ background: corDe(m.slug) }} aria-hidden>
-                  <span>{sigla(m)}</span>
-                  {anoM && <span className="ano">{anoM}</span>}
-                </div>
-                <div className="info">
-                  <h3 title={m.titulo}>
-                    <Destaque texto={m.titulo} busca={buscaAdiada} />
-                  </h3>
-                  <div className="meta mt-8">
-                    <span className="etiqueta">{m.instituicao.replace(/_/g, ' ')}</span>
-                    {m.atualizadoEm && <span>Atualizado {m.atualizadoEm}</span>}
-                    {expira && (
-                      <span className="etiqueta sucesso">
-                        <Icone nome="check" tamanho={12} /> Liberado · {diasRestantes(expira)}d
+        ) : (
+          <ul className="fichas">
+            {visiveis.map((m) => {
+              const expira = liberados.get(m.id);
+              const no = noCarrinho.has(m.id);
+              const unitario = no ? calcularOrcamento(noCarrinho.size).unitario : unitarioAtual;
+              return (
+                <li key={m.id} className={`ficha ${no ? 'no-carrinho' : ''}`}>
+                  <span className="aba-banca" style={{ background: corDe(m.slug) }} aria-hidden>
+                    {sigla(m).slice(0, 12)}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <h3 title={m.titulo}>
+                      <span className={no ? 'grifado' : undefined}>
+                        <Destaque texto={m.titulo} busca={buscaAdiada} />
                       </span>
-                    )}
+                    </h3>
+                    <div className="meta">
+                      {m.atualizadoEm && <span>Atualizado em {m.atualizadoEm}</span>}
+                      {expira && (
+                        <span className="liberado">
+                          <Icone nome="check" tamanho={13} /> Pago, liberado por {diasRestantes(expira)} dias
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="rodape">
-                  {expira ? (
-                    <>
-                      <span className="muted pequeno">Pago</span>
-                      <button className="btn btn-secundario btn-pequeno" onClick={aoIrParaDownloads}>
+                  <div className="acao">
+                    {expira ? (
+                      <button className="btn btn-secundario btn-pequeno btn-alternar" onClick={aoIrParaDownloads}>
                         <Icone nome="download" tamanho={15} /> Baixar
                       </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="preco">
-                        {unitarioAtual < PRECO_BASE && <s>{formatarReais(PRECO_BASE)}</s>}
-                        {formatarReais(unitarioAtual)}
-                      </span>
-                      <button
-                        className={`btn btn-pequeno ${no ? 'btn-secundario' : 'btn-primario'}`}
-                        onClick={() => aoAlternar(m.id)}
-                        aria-pressed={no}
-                        aria-label={no ? `Remover ${m.titulo} do carrinho` : `Adicionar ${m.titulo} ao carrinho`}
-                      >
-                        <Icone nome={no ? 'check' : 'mais'} tamanho={15} />
-                        {no ? 'No carrinho' : 'Adicionar'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
+                    ) : (
+                      <>
+                        <span className="preco">
+                          {unitario < PRECO_BASE && <s>{formatarReais(PRECO_BASE)}</s>}
+                          {formatarReais(unitario)}
+                        </span>
+                        <button
+                          className={`btn btn-pequeno btn-alternar ${no ? 'btn-secundario' : 'btn-primario'}`}
+                          onClick={() => aoAlternar(m.id)}
+                          aria-pressed={no}
+                          aria-label={no ? `Tirar ${m.titulo} do pedido` : `Adicionar ${m.titulo} ao pedido`}
+                        >
+                          <Icone nome={no ? 'check' : 'mais'} tamanho={15} />
+                          {no ? 'No pedido' : 'Adicionar'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </>
   );
 }

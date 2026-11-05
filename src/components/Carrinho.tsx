@@ -4,186 +4,192 @@ import { useEffect, useState } from 'react';
 import { Icone } from './Icone';
 import { useDialogo } from './Modal';
 import { MetaDesconto, TabelaPrecos } from './TabelaPrecos';
-import { corDe, plural, sigla, type Material } from '@/lib/cliente';
+import { corDe, plural, type Material } from '@/lib/cliente';
 import { calcularOrcamento, formatarReais, MAX_ITENS_PEDIDO, PRECO_BASE } from '@/lib/precos';
 
 const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-export function Carrinho({
-  aberto,
-  itens,
-  emailPadrao,
-  gerando,
-  pagamentoAtivo,
-  cartaoAtivo,
-  aoFechar,
-  aoRemover,
-  aoLimpar,
-  aoFinalizar,
-}: {
-  aberto: boolean;
+type Props = {
   itens: Material[];
   emailPadrao: string;
   gerando: boolean;
   pagamentoAtivo: boolean;
   cartaoAtivo: boolean;
-  aoFechar: () => void;
   aoRemover: (id: number) => void;
   aoLimpar: () => void;
   aoFinalizar: (email: string, metodo: 'pix' | 'cartao') => void;
-}) {
-  const ref = useDialogo(aberto, aoFechar);
-  const [email, setEmail] = useState(emailPadrao);
-  const [verTabela, setVerTabela] = useState(false);
-  useEffect(() => setEmail((e) => e || emailPadrao), [emailPadrao]);
+  aoFechar?: () => void;
+};
 
-  if (!aberto) return null;
+/** Conteudo do carrinho, usado no painel fixo (desktop) e na gaveta. */
+function ConteudoCarrinho({
+  itens,
+  emailPadrao,
+  gerando,
+  pagamentoAtivo,
+  cartaoAtivo,
+  aoRemover,
+  aoLimpar,
+  aoFinalizar,
+  aoFechar,
+}: Props) {
+  const [email, setEmail] = useState(emailPadrao);
+  useEffect(() => setEmail((e) => e || emailPadrao), [emailPadrao]);
 
   const o = calcularOrcamento(itens.length);
   const excesso = itens.length > MAX_ITENS_PEDIDO;
   const emailOk = EMAIL_VALIDO.test(email.trim());
+  const bloqueado = gerando || !emailOk || excesso || !pagamentoAtivo;
 
   return (
     <>
-      <div className="veu" onClick={aoFechar} />
-      <aside className="gaveta" role="dialog" aria-modal="true" aria-label="Carrinho" ref={ref}>
-        <div className="gaveta-topo">
-          <h2>
-            <Icone nome="carrinho" /> Carrinho
-            <span className="etiqueta primaria">{itens.length}</span>
-          </h2>
+      <div className="carrinho-topo">
+        <h2>
+          <Icone nome="carrinho" /> Seu pedido
+        </h2>
+        {aoFechar ? (
           <button className="icone-btn" onClick={aoFechar} aria-label="Fechar carrinho">
             <Icone nome="x" />
           </button>
-        </div>
-
-        <div className="gaveta-corpo">
-          {itens.length === 0 ? (
-            <div className="vazio">
-              <div className="icone-grande">
-                <Icone nome="carrinho" tamanho={28} />
-              </div>
-              <h3>Seu carrinho está vazio</h3>
-              <p>Adicione materiais da lista para montar seu pedido.</p>
-              <button className="btn btn-primario mt-16" onClick={aoFechar}>
-                Ver materiais
-              </button>
-            </div>
-          ) : (
-            <>
-              <MetaDesconto quantidade={itens.length} />
-
-              <div className="coluna" style={{ gap: 8 }}>
-                {itens.map((m) => (
-                  <div key={m.id} className="item-carrinho">
-                    <div className="mini-capa" style={{ background: corDe(m.slug) }} aria-hidden>
-                      {sigla(m).slice(0, 5)}
-                    </div>
-                    <div className="info">
-                      <strong title={m.titulo}>{m.titulo}</strong>
-                      <span>
-                        {o.unitario < PRECO_BASE && <s>{formatarReais(PRECO_BASE)} </s>}
-                        {formatarReais(o.unitario)}
-                      </span>
-                    </div>
-                    <button
-                      className="icone-btn"
-                      onClick={() => aoRemover(m.id)}
-                      aria-label={`Remover ${m.titulo}`}
-                      title="Remover"
-                    >
-                      <Icone nome="lixo" tamanho={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="linha entre">
-                <button className="btn btn-fantasma btn-pequeno" onClick={() => setVerTabela((v) => !v)}>
-                  <Icone nome="etiqueta" tamanho={15} /> {verTabela ? 'Esconder' : 'Ver'} tabela de descontos
-                </button>
-                <button className="btn btn-perigo btn-pequeno" onClick={aoLimpar}>
-                  Esvaziar
-                </button>
-              </div>
-              {verTabela && <TabelaPrecos quantidade={itens.length} />}
-            </>
-          )}
-        </div>
-
-        {itens.length > 0 && (
-          <div className="gaveta-rodape">
-            <div className="linha-total">
-              <span>Subtotal ({plural(itens.length, 'material', 'materiais')})</span>
-              <span>{formatarReais(o.subtotal)}</span>
-            </div>
-            {o.desconto > 0 && (
-              <div className="linha-total desconto">
-                <span>Desconto por quantidade ({o.percentualDesconto}%)</span>
-                <span>−{formatarReais(o.desconto)}</span>
-              </div>
-            )}
-            <div className="linha-total final">
-              <span>Total no Pix</span>
-              <span>{formatarReais(o.total)}</span>
-            </div>
-
-            <div className="campo" style={{ marginBottom: 0 }}>
-              <label htmlFor="email-pix">E-mail para o comprovante</label>
-              <input
-                id="email-pix"
-                className="entrada"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                aria-invalid={email.length > 0 && !emailOk}
-                autoComplete="email"
-              />
-            </div>
-
-            {excesso && (
-              <div className="aviso aviso-alerta pequeno">
-                <Icone nome="alerta" />
-                <span>Cada pedido aceita até {MAX_ITENS_PEDIDO} materiais. Remova alguns itens.</span>
-              </div>
-            )}
-            {!pagamentoAtivo && (
-              <div className="aviso aviso-alerta pequeno">
-                <Icone nome="alerta" />
-                <span>Os pagamentos ainda não foram ativados neste servidor.</span>
-              </div>
-            )}
-
-            <button
-              className="btn btn-pix btn-bloco btn-grande"
-              onClick={() => aoFinalizar(email.trim(), 'pix')}
-              disabled={gerando || !emailOk || excesso || !pagamentoAtivo}
-            >
-              {gerando ? (
-                <>
-                  <span className="girando" /> Gerando Pix...
-                </>
-              ) : (
-                <>
-                  <Icone nome="pix" /> Pagar {formatarReais(o.total)} com Pix
-                </>
-              )}
+        ) : (
+          itens.length > 0 && (
+            <button className="btn btn-fantasma btn-pequeno" onClick={aoLimpar}>
+              Esvaziar
             </button>
-            {cartaoAtivo && (
-              <button
-                className="btn btn-secundario btn-bloco"
-                onClick={() => aoFinalizar(email.trim(), 'cartao')}
-                disabled={gerando || !emailOk || excesso || !pagamentoAtivo}
-              >
-                <Icone nome="recibo" /> Pagar com cartão (Mercado Pago)
-              </button>
-            )}
-            <p className="dica" style={{ textAlign: 'center' }}>
-              Pagamento processado pelo Mercado Pago.
-              O download libera assim que o pagamento é confirmado.
-            </p>
-          </div>
+          )
         )}
+      </div>
+
+      <div className="carrinho-corpo">
+        <TabelaPrecos quantidade={itens.length} />
+        <MetaDesconto quantidade={itens.length} />
+
+        {itens.length === 0 ? (
+          <p className="muted pequeno">
+            Clique em <strong>Adicionar</strong> nos materiais que quer baixar. Eles ficam grifados na lista.
+          </p>
+        ) : (
+          <ul className="itens-carrinho">
+            {itens.map((m) => (
+              <li key={m.id} className="item-carrinho">
+                <span className="cor" style={{ background: corDe(m.slug) }} aria-hidden />
+                <div className="info">
+                  <strong title={m.titulo}>{m.titulo}</strong>
+                  <span className="muted">
+                    {o.unitario < PRECO_BASE && <s>{formatarReais(PRECO_BASE)}</s>} {formatarReais(o.unitario)}
+                  </span>
+                </div>
+                <button
+                  className="icone-btn remover"
+                  onClick={() => aoRemover(m.id)}
+                  aria-label={`Remover ${m.titulo}`}
+                  title="Remover"
+                >
+                  <Icone nome="x" tamanho={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {aoFechar && itens.length > 0 && (
+          <button className="btn btn-fantasma btn-pequeno" onClick={aoLimpar} style={{ alignSelf: 'flex-start' }}>
+            Esvaziar o pedido
+          </button>
+        )}
+      </div>
+
+      {itens.length > 0 && (
+        <div className="carrinho-rodape">
+          <div className="linha-total">
+            <span>{plural(itens.length, 'material', 'materiais')}</span>
+            <span>{formatarReais(o.subtotal)}</span>
+          </div>
+          {o.desconto > 0 && (
+            <div className="linha-total desconto">
+              <span>Desconto por quantidade</span>
+              <span>−{formatarReais(o.desconto)}</span>
+            </div>
+          )}
+          <div className="linha-total final">
+            <span>Total</span>
+            <span>{formatarReais(o.total)}</span>
+          </div>
+
+          <div className="campo" style={{ marginBottom: 0 }}>
+            <label htmlFor={aoFechar ? 'email-pix-gaveta' : 'email-pix'}>E-mail para o comprovante</label>
+            <input
+              id={aoFechar ? 'email-pix-gaveta' : 'email-pix'}
+              className="entrada"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={email.length > 0 && !emailOk}
+              autoComplete="email"
+            />
+          </div>
+
+          {excesso && (
+            <div className="aviso aviso-alerta pequeno">
+              <Icone nome="alerta" />
+              <span>Cada pedido aceita até {MAX_ITENS_PEDIDO} materiais. Remova alguns.</span>
+            </div>
+          )}
+          {!pagamentoAtivo && (
+            <div className="aviso aviso-alerta pequeno">
+              <Icone nome="alerta" />
+              <span>Os pagamentos ainda não foram ativados neste servidor.</span>
+            </div>
+          )}
+
+          <button
+            className="btn btn-pix btn-bloco btn-grande"
+            onClick={() => aoFinalizar(email.trim(), 'pix')}
+            disabled={bloqueado}
+          >
+            {gerando ? (
+              <>
+                <span className="girando" /> Gerando o pagamento...
+              </>
+            ) : (
+              <>
+                <Icone nome="pix" /> Pagar {formatarReais(o.total)} com Pix
+              </>
+            )}
+          </button>
+          {cartaoAtivo && (
+            <button
+              className="btn btn-secundario btn-bloco"
+              onClick={() => aoFinalizar(email.trim(), 'cartao')}
+              disabled={bloqueado}
+            >
+              Pagar com cartão
+            </button>
+          )}
+          <p className="dica">O download é liberado assim que o Mercado Pago confirma o pagamento.</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Painel fixo ao lado da lista (telas largas). */
+export function PainelCarrinho(props: Props) {
+  return (
+    <aside className="painel-carrinho" aria-label="Seu pedido">
+      <ConteudoCarrinho {...props} />
+    </aside>
+  );
+}
+
+/** Gaveta lateral (tablet e celular). */
+export function Carrinho({ aberto, aoFechar, ...props }: Props & { aberto: boolean; aoFechar: () => void }) {
+  const ref = useDialogo(aberto, aoFechar);
+  if (!aberto) return null;
+  return (
+    <>
+      <div className="veu" onClick={aoFechar} />
+      <aside className="gaveta" role="dialog" aria-modal="true" aria-label="Seu pedido" ref={ref}>
+        <ConteudoCarrinho {...props} aoFechar={aoFechar} />
       </aside>
     </>
   );

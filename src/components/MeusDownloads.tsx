@@ -8,7 +8,6 @@ import {
   formatarData,
   formatarDuracao,
   plural,
-  sigla,
   type Material,
   type Pedido,
 } from '@/lib/cliente';
@@ -37,7 +36,7 @@ function PainelProgresso({
   const eta = pct > 3 && pct < 100 ? (decorrido / pct) * (100 - pct) : null;
 
   return (
-    <div className="cartao painel-progresso" role="region" aria-label="Download em andamento">
+    <div className="painel-progresso" role="region" aria-label="Download em andamento">
       <div className="linha">
         <span className="girando" style={{ color: 'var(--primary)' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -128,13 +127,13 @@ export function MeusDownloads({
 
   return (
     <section aria-labelledby="titulo-downloads">
-      <div className="secao-titulo">
+      <div className="cabeca-secao">
         <div>
           <h1 id="titulo-downloads">Meus downloads</h1>
-          <p>Materiais pagos ficam liberados para baixar de novo enquanto a licença valer.</p>
+          <p>O que você pagou pode ser baixado de novo enquanto estiver liberado.</p>
         </div>
         <button className="btn btn-secundario btn-pequeno" onClick={aoIrParaCatalogo}>
-          <Icone nome="livro" tamanho={16} /> Ver catálogo
+          <Icone nome="livro" tamanho={16} /> Ver materiais
         </button>
       </div>
 
@@ -143,7 +142,7 @@ export function MeusDownloads({
       <div className="downloads-layout">
         <div>
           {pagos.length === 0 ? (
-            <div className="cartao vazio">
+            <div className="lista-downloads vazio">
               <div className="icone-grande">
                 <Icone nome="download" tamanho={28} />
               </div>
@@ -158,7 +157,7 @@ export function MeusDownloads({
               <div className="resumo-lista">
                 <span>
                   {plural(pagos.length, 'material liberado', 'materiais liberados')}
-                  {selecionados.length > 0 && <> · {selecionados.length} marcado(s)</>}
+                  {selecionados.length > 0 && <>, {selecionados.length} marcado(s)</>}
                 </span>
                 <div className="acoes">
                   <button
@@ -171,9 +170,9 @@ export function MeusDownloads({
                   </button>
                 </div>
               </div>
-              <div className="lista-downloads">
+              <ul className="lista-downloads">
                 {pagos.map((m) => (
-                  <div key={m.id} className="linha-download">
+                  <li key={m.id} className="linha-download">
                     <input
                       type="checkbox"
                       checked={marcados.has(m.id)}
@@ -181,29 +180,12 @@ export function MeusDownloads({
                       aria-label={`Marcar ${m.titulo}`}
                       style={{ width: 18, height: 18, accentColor: 'var(--primary)' }}
                     />
-                    <div
-                      className="mini-capa"
-                      style={{
-                        background: corDe(m.slug),
-                        width: 40,
-                        height: 40,
-                        borderRadius: 10,
-                        color: '#fff',
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontSize: '0.6rem',
-                        fontWeight: 800,
-                        flexShrink: 0,
-                      }}
-                      aria-hidden
-                    >
-                      {sigla(m).slice(0, 5)}
-                    </div>
+                    <span className="cor" style={{ background: corDe(m.slug) }} aria-hidden />
                     <div className="info">
                       <strong title={m.titulo}>{m.titulo}</strong>
                       <span>
                         Liberado por mais {plural(diasRestantes(liberados.get(m.id)!), 'dia', 'dias')}
-                        {baixados.has(m.id) && ' · já baixado'}
+                        {baixados.has(m.id) && ', já baixado'}
                       </span>
                     </div>
                     <button
@@ -213,16 +195,16 @@ export function MeusDownloads({
                     >
                       <Icone nome="arquivo" tamanho={15} /> PDF
                     </button>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </>
           )}
         </div>
 
         <aside className="lateral">
           {pagos.length > 0 && (
-            <div className="cartao cartao-corpo">
+            <div className="bloco">
               <strong>Baixar em pacote</strong>
               <p className="muted pequeno mt-8">
                 {selecionados.length
@@ -239,7 +221,7 @@ export function MeusDownloads({
             </div>
           )}
 
-          <div className="cartao cartao-corpo">
+          <div className="bloco">
             <strong>Opções do arquivo</strong>
             <div className="coluna mt-12">
               <span className="rotulo">Qualidade das páginas</span>
@@ -272,7 +254,7 @@ export function MeusDownloads({
           </div>
 
           {pedidos.length > 0 && (
-            <div className="cartao cartao-corpo">
+            <div className="bloco">
               <div className="linha">
                 <Icone nome="recibo" />
                 <strong>Histórico de pedidos</strong>
@@ -291,7 +273,7 @@ export function MeusDownloads({
                       </span>
                     </div>
                     <span className="muted">
-                      {formatarData(p.criadoEm)} · {plural(p.materialIds.length, 'material', 'materiais')}
+                      {formatarData(p.criadoEm)}, {plural(p.materialIds.length, 'material', 'materiais')}
                     </span>
                     <span className="muted" style={{ fontSize: '0.72rem', wordBreak: 'break-all' }}>
                       Pedido {p.id.startsWith('sim_') ? 'de teste' : `#${p.id}`}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cabecalho, type Aba, type Tema } from '@/components/Cabecalho';
-import { Carrinho } from '@/components/Carrinho';
+import { Carrinho, PainelCarrinho } from '@/components/Carrinho';
 import { Catalogo } from '@/components/Catalogo';
 import { Checkout, type EstadoPix } from '@/components/Checkout';
 import { Faq } from '@/components/Faq';
@@ -230,7 +230,6 @@ function App() {
       gravar(chaves.sessao, nova, 'sessao');
       setMateriais(json.materiais);
       setAba('catalogo');
-      avisar(`Conectado! ${plural(json.total, 'material encontrado', 'materiais encontrados')}.`, 'sucesso');
     } catch {
       setErroLogin('Não foi possível falar com o servidor. Verifique sua internet.');
     } finally {
@@ -278,10 +277,6 @@ function App() {
       avisar(`O limite é de ${MAX_ITENS_PEDIDO} materiais por pedido.`, 'alerta');
       return;
     }
-    const o = calcularOrcamento(carrinho.length + 1);
-    if (o.faixa.minimo === carrinho.length + 1 && carrinho.length > 0) {
-      avisar(`Desconto desbloqueado! Agora cada material sai por ${formatarReais(o.unitario)}.`, 'sucesso');
-    }
     setCarrinho([...carrinho, id]);
   }
 
@@ -289,13 +284,6 @@ function App() {
     const novos = ids.filter((id) => !carrinho.includes(id) && !liberados.has(id));
     const resultado = [...carrinho, ...novos].slice(0, MAX_ITENS_PEDIDO);
     const entraram = resultado.length - carrinho.length;
-    if (entraram > 0) {
-      const o = calcularOrcamento(resultado.length);
-      avisar(
-        `${plural(entraram, 'material adicionado', 'materiais adicionados')}. Cada um sai por ${formatarReais(o.unitario)}.`,
-        'sucesso',
-      );
-    }
     if (resultado.length < carrinho.length + novos.length) {
       avisar(`O limite é de ${MAX_ITENS_PEDIDO} materiais por pedido.`, 'alerta');
     }
@@ -491,7 +479,7 @@ function App() {
   useEffect(() => {
     const p = emAndamento?.progresso;
     if (p && p.paginasTotal) {
-      document.title = `${Math.round((p.paginasBaixadas / p.paginasTotal) * 100)}% · Baixando - APMED`;
+      document.title = `${Math.round((p.paginasBaixadas / p.paginasTotal) * 100)}% baixado - APMED`;
     } else if (pix && estadoPix === 'aguardando') {
       document.title = 'Aguardando Pix - APMED Downloader';
     } else {
@@ -614,16 +602,17 @@ function App() {
               </div>
             )}
 
-            <div className="abas-mobile" role="tablist">
-              <button className="chip" aria-pressed={aba === 'catalogo'} onClick={() => setAba('catalogo')}>
-                <Icone nome="livro" tamanho={14} /> Catálogo
+            <nav className="abas-mobile" aria-label="Seções">
+              <button aria-pressed={aba === 'catalogo'} onClick={() => setAba('catalogo')}>
+                <Icone nome="livro" tamanho={15} /> Materiais
               </button>
-              <button className="chip" aria-pressed={aba === 'downloads'} onClick={() => setAba('downloads')}>
-                <Icone nome="download" tamanho={14} /> Meus downloads {liberados.size > 0 && `(${liberados.size})`}
+              <button aria-pressed={aba === 'downloads'} onClick={() => setAba('downloads')}>
+                <Icone nome="download" tamanho={15} /> Downloads{liberados.size > 0 && ` (${liberados.size})`}
               </button>
-            </div>
+            </nav>
 
             {aba === 'catalogo' ? (
+              <div className="mesa">
               <Catalogo
                 materiais={materiais}
                 carregando={carregandoLista}
@@ -635,6 +624,17 @@ function App() {
                 aoRecarregar={recarregarLista}
                 aoIrParaDownloads={() => setAba('downloads')}
               />
+              <PainelCarrinho
+                itens={itensCarrinho}
+                emailPadrao={sessao.email}
+                gerando={gerandoPix}
+                pagamentoAtivo={config.pagamento !== 'desativado'}
+                cartaoAtivo={config.pagamento === 'mercadopago'}
+                aoRemover={(id) => removerVarios([id])}
+                aoLimpar={() => setCarrinho([])}
+                aoFinalizar={finalizarCompra}
+              />
+              </div>
             ) : (
               <MeusDownloads
                 materiais={materiais}
@@ -673,11 +673,11 @@ function App() {
             <span className="valor">{formatarReais(orcamento.total)}</span>
             <small>
               {plural(carrinho.length, 'material', 'materiais')}
-              {orcamento.desconto > 0 && ` · economia de ${formatarReais(orcamento.desconto)}`}
+              {orcamento.desconto > 0 && `, economia de ${formatarReais(orcamento.desconto)}`}
             </small>
           </div>
           <button className="btn btn-pix btn-pequeno" onClick={() => setCarrinhoAberto(true)}>
-            <Icone nome="carrinho" tamanho={16} /> Ver carrinho
+            Ver pedido
           </button>
         </div>
       )}
@@ -711,8 +711,10 @@ function App() {
       )}
 
       <footer className="rodape-site">
-        <p>APMED Downloader · uso pessoal com a sua própria conta do portal APMED.</p>
-        <p>Pagamentos processados pelo Mercado Pago. Este serviço não é afiliado ao APMED.</p>
+        <div className="dentro">
+          <p>Para uso pessoal, com a sua própria conta do portal APMED. Não somos afiliados ao APMED.</p>
+          <p>Pagamentos processados pelo Mercado Pago.</p>
+        </div>
       </footer>
     </div>
   );

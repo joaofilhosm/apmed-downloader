@@ -138,3 +138,18 @@ Lista do que foi implementado na reformulação (carrinho + Pix + nova interface
 119. Rota `/api/config` com faixas de preço e modo de pagamento.
 120. Aviso visível de "modo de teste" quando os pagamentos são simulados.
 121. README atualizado com o fluxo de pagamento e a arquitetura.
+
+## Redesign "mesa de estudo" (segunda rodada)
+122. Identidade visual própria: papel frio, tinta azul-esverdeada, verde-jaleco nas ações e marca-texto amarelo como único destaque.
+123. O que está no pedido fica grifado na lista, como o que se separa para estudar; a busca grifa os termos encontrados.
+124. Fonte Archivo (variável), com largura expandida nos títulos e normal na interface.
+125. Desktop em três regiões: índice de bancas, lista e pedido sempre visível ao lado.
+126. Tablet: índice + lista, pedido em gaveta e barra inferior com o total.
+127. Celular: filtros e pagamento abrem como painel que sobe de baixo; formulário de entrada logo após o título.
+128. Escada de preços mostra o degrau atual do pedido.
+129. Tela de entrada com estante de lombadas das bancas reais.
+130. Cores sólidas por banca (sem gradientes) e fichas em lista no lugar de cards idênticos.
+131. Avisos reduzidos ao essencial e posicionados para não cobrir o botão de pagar.
+132. Ícone do tema decidido depois da montagem (corrige aviso de hidratação).
+133. Pagamento com cartão (Checkout Pro) ao lado do Pix.
+134. Instituição detectada pelo título: cada hospital é sua própria banca e as versões "ampliadas" ficam juntas.
