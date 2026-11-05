@@ -22,7 +22,7 @@ export type DownloadEmAndamento = {
   progresso: Progresso | null;
 };
 
-function PainelProgresso({
+export function PainelProgresso({
   atual,
   aoCancelar,
 }: {
