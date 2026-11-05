@@ -31,6 +31,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   try {
     const pagamento = await consultarPagamento(decodeURIComponent(id));
 
+    // Checkout aberto, mas o comprador ainda nao pagou nada.
+    if (!pagamento.encontrado) {
+      return NextResponse.json({
+        ok: true,
+        id: pagamento.id,
+        status: 'pending',
+        aprovado: false,
+        encerrado: false,
+        materialIds: [],
+        valor: 0,
+        licenca: null,
+      });
+    }
+
     // O pagamento precisa ser da mesma conta APMED que esta logada.
     if (!pagamento.conta || pagamento.conta !== sessao.conta) {
       return erro('Este pagamento pertence a outra conta.', 403);

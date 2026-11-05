@@ -15,6 +15,7 @@ export function Carrinho({
   emailPadrao,
   gerando,
   pagamentoAtivo,
+  cartaoAtivo,
   aoFechar,
   aoRemover,
   aoLimpar,
@@ -25,10 +26,11 @@ export function Carrinho({
   emailPadrao: string;
   gerando: boolean;
   pagamentoAtivo: boolean;
+  cartaoAtivo: boolean;
   aoFechar: () => void;
   aoRemover: (id: number) => void;
   aoLimpar: () => void;
-  aoFinalizar: (email: string) => void;
+  aoFinalizar: (email: string, metodo: 'pix' | 'cartao') => void;
 }) {
   const ref = useDialogo(aberto, aoFechar);
   const [email, setEmail] = useState(emailPadrao);
@@ -154,7 +156,7 @@ export function Carrinho({
 
             <button
               className="btn btn-pix btn-bloco btn-grande"
-              onClick={() => aoFinalizar(email.trim())}
+              onClick={() => aoFinalizar(email.trim(), 'pix')}
               disabled={gerando || !emailOk || excesso || !pagamentoAtivo}
             >
               {gerando ? (
@@ -167,9 +169,18 @@ export function Carrinho({
                 </>
               )}
             </button>
+            {cartaoAtivo && (
+              <button
+                className="btn btn-secundario btn-bloco"
+                onClick={() => aoFinalizar(email.trim(), 'cartao')}
+                disabled={gerando || !emailOk || excesso || !pagamentoAtivo}
+              >
+                <Icone nome="recibo" /> Pagar com cartão (Mercado Pago)
+              </button>
+            )}
             <p className="dica" style={{ textAlign: 'center' }}>
               Pagamento processado pelo Mercado Pago.
-              O download libera assim que o Pix é confirmado.
+              O download libera assim que o pagamento é confirmado.
             </p>
           </div>
         )}

@@ -28,6 +28,11 @@ import { calcularOrcamento, formatarReais, MAX_ITENS_PEDIDO } from '@/lib/precos
 type Sessao = { sessaoId: string; conta: string; email: string; expiraEm: number };
 type Config = { pagamento: 'mercadopago' | 'simulado' | 'desativado'; diasLicenca: number };
 
+/** Volta do Checkout Pro: o Mercado Pago devolve o usuario com ?retorno=mercadopago. */
+function voltouDoMercadoPago(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('retorno') === 'mercadopago';
+}
+
 export default function Pagina() {
   return (
     <ProvedorToasts>
@@ -137,6 +142,17 @@ function App() {
     }
     setCarregado(true);
   }, [conta]);
+
+  // De volta do Checkout Pro: limpa a URL e mostra o acompanhamento do pedido.
+  useEffect(() => {
+    if (!carregado || !voltouDoMercadoPago()) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (pix) {
+      setCheckoutAberto(true);
+      avisar('Conferindo o pagamento no Mercado Pago...', 'info');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carregado]);
 
   useEffect(() => void (carregado && gravar(chaves.carrinho(conta), carrinho)), [carregado, conta, carrinho]);
   useEffect(() => void (carregado && gravar(chaves.licencas(conta), licencas)), [carregado, conta, licencas]);
@@ -292,7 +308,7 @@ function App() {
   }
 
   /* ------------------------------------------------------------ pagamento */
-  async function finalizarCompra(email: string) {
+  async function finalizarCompra(email: string, metodo: 'pix' | 'cartao' = 'pix') {
     if (!sessao || carrinho.length === 0) return;
     if (pix && estadoPix === 'aguardando' && pix.expiraEm > Date.now()) {
       if (!confirm('Você já tem um Pix aguardando pagamento. Gerar um novo para o carrinho atual?')) {
@@ -310,7 +326,7 @@ function App() {
           'x-sessao': sessao.sessaoId,
           'x-licencas': licencas.map((l) => l.token).join(' '),
         },
-        body: JSON.stringify({ materialIds: carrinho, email }),
+        body: JSON.stringify({ materialIds: carrinho, email, metodo }),
       });
       const json = await res.json().catch(() => ({ ok: false }));
       if (res.status === 401) return encerrarSessao('Sua sessão expirou. Entre de novo para pagar.');
@@ -319,8 +335,22 @@ function App() {
         if (Array.isArray(json.jaPagos)) removerVarios(json.jaPagos);
         return avisar(json.erro || 'Não foi possível gerar o Pix.', 'erro', 7000);
       }
-      const novo: PixPendente = {
+      const novo: PixPendente = json.checkout
+        ? {
+            id: json.checkout.id,
+            tipo: 'checkout',
+            urlCheckout: json.checkout.url,
+            qrCode: '',
+            qrCodeBase64: '',
+            ticketUrl: '',
+            expiraEm: json.checkout.expiraEm,
+            simulado: false,
+            materialIds: json.materialIds,
+            valor: json.orcamento.total,
+          }
+        : {
         id: json.pagamento.id,
+        tipo: 'pix',
         qrCode: json.pagamento.qrCode,
         qrCodeBase64: json.pagamento.qrCodeBase64,
         ticketUrl: json.pagamento.ticketUrl,
@@ -329,20 +359,26 @@ function App() {
         materialIds: json.materialIds,
         valor: json.orcamento.total,
       };
+      const pedido: Pedido = {
+        id: novo.id,
+        criadoEm: Date.now(),
+        materialIds: novo.materialIds,
+        titulos: itensCarrinho.filter((m) => novo.materialIds.includes(m.id)).map((m) => m.titulo),
+        valor: novo.valor,
+        status: 'pendente',
+      };
       setPix(novo);
       setEstadoPix('aguardando');
-      setPedidos((p) => [
-        {
-          id: novo.id,
-          criadoEm: Date.now(),
-          materialIds: novo.materialIds,
-          titulos: itensCarrinho.filter((m) => novo.materialIds.includes(m.id)).map((m) => m.titulo),
-          valor: novo.valor,
-          status: 'pendente',
-        },
-        ...p,
-      ]);
+      setPedidos((p) => [pedido, ...p]);
       setCarrinhoAberto(false);
+      if (novo.tipo === 'checkout' && novo.urlCheckout) {
+        // O pedido ja foi salvo: o Mercado Pago devolve o usuario para ca depois de pagar.
+        gravar(chaves.pix(sessao.conta), novo);
+        gravar(chaves.pedidos(sessao.conta), [pedido, ...pedidos].slice(0, 50));
+        avisar('Abrindo a página de pagamento do Mercado Pago...', 'info');
+        window.location.assign(novo.urlCheckout);
+        return;
+      }
       setCheckoutAberto(true);
       // Pede permissao para avisar quando o Pix cair (util se o usuario trocar de aba).
       if ('Notification' in window && Notification.permission === 'default') {
@@ -570,10 +606,10 @@ function App() {
               <div className="aviso aviso-info mb-16">
                 <Icone nome="pix" />
                 <span style={{ flex: 1 }}>
-                  Você tem um Pix de <strong>{formatarReais(pix.valor)}</strong> aguardando pagamento.
+                  Você tem um pagamento de <strong>{formatarReais(pix.valor)}</strong> aguardando confirmação.
                 </span>
                 <button className="btn btn-pix btn-pequeno" onClick={() => setCheckoutAberto(true)}>
-                  Ver QR Code
+                  {pix.tipo === 'checkout' ? 'Acompanhar' : 'Ver QR Code'}
                 </button>
               </div>
             )}
@@ -652,6 +688,7 @@ function App() {
         emailPadrao={sessao?.email ?? ''}
         gerando={gerandoPix}
         pagamentoAtivo={config.pagamento !== 'desativado'}
+        cartaoAtivo={config.pagamento === 'mercadopago'}
         aoFechar={() => setCarrinhoAberto(false)}
         aoRemover={(id) => removerVarios([id])}
         aoLimpar={() => setCarrinho([])}

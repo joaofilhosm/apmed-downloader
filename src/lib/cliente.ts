@@ -32,6 +32,9 @@ export type Pedido = {
 
 export type PixPendente = {
   id: string;
+  /** 'checkout' = cartao na pagina do Mercado Pago (sem QR Code). */
+  tipo?: 'pix' | 'checkout';
+  urlCheckout?: string;
   qrCode: string;
   qrCodeBase64: string;
   ticketUrl: string;

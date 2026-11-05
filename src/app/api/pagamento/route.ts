@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listarMateriais, ApmedError } from '@/lib/apmed';
 import { erro, excedeuLimite, licencasDe, sessaoDe } from '@/lib/http';
 import { licencaCobre } from '@/lib/licenca';
-import { criarPix, PagamentoError } from '@/lib/mercadopago';
+import { criarCheckout, criarPix, modoPagamento, PagamentoError } from '@/lib/mercadopago';
 import { calcularOrcamento, MAX_ITENS_PEDIDO } from '@/lib/precos';
 
 export const dynamic = 'force-dynamic';
@@ -12,9 +12,10 @@ const EMAIL_VALIDO = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
 /**
  * POST /api/pagamento   (cabecalhos x-sessao e x-licencas)
- * Body: { materialIds: number[], email: string }
+ * Body: { materialIds: number[], email: string, metodo?: 'pix' | 'cartao' }
  *
- * Cria a cobranca Pix do carrinho. O valor e SEMPRE calculado aqui, a
+ * Cria a cobranca do carrinho: Pix (QR Code na propria pagina) ou cartao
+ * (Checkout Pro, na pagina do Mercado Pago). O valor e SEMPRE calculado aqui, a
  * partir da quantidade de materiais validos - nunca vem do navegador.
  */
 export async function POST(req: NextRequest) {
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     return erro('Voce gerou muitos Pix seguidos. Aguarde alguns minutos.', 429);
   }
 
-  let body: { materialIds?: unknown; email?: unknown };
+  let body: { materialIds?: unknown; email?: unknown; metodo?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -71,17 +72,31 @@ export async function POST(req: NextRequest) {
         ? `APMED Downloader - ${titulos[0]}`
         : `APMED Downloader - ${cobrar.length} materiais`;
 
-    const origem = process.env.APP_URL || '';
-    const pix = await criarPix({
+    const origem = (process.env.APP_URL || '').replace(/\/$/, '');
+    const pedido = {
       valor: orcamento.total,
       descricao,
       email,
       conta: sessao.conta,
       materiais: cobrar,
-      urlNotificacao: origem.startsWith('https://')
-        ? `${origem.replace(/\/$/, '')}/api/pagamento/webhook`
-        : undefined,
-    });
+      urlNotificacao: origem.startsWith('https://') ? `${origem}/api/pagamento/webhook` : undefined,
+    };
+
+    // Cartao usa o Checkout Pro. No modo simulado cai no Pix simulado.
+    if (body.metodo === 'cartao' && modoPagamento() === 'mercadopago') {
+      // Volta para o mesmo endereco em que o usuario esta (prevista, local ou producao).
+      const urlRetorno = `${req.nextUrl.origin}/?retorno=mercadopago`;
+      const checkout = await criarCheckout({ ...pedido, titulos, urlRetorno });
+      return NextResponse.json({
+        ok: true,
+        checkout,
+        materialIds: cobrar,
+        jaPagos,
+        orcamento,
+      });
+    }
+
+    const pix = await criarPix(pedido);
 
     return NextResponse.json({
       ok: true,

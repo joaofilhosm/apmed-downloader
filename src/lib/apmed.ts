@@ -12,6 +12,7 @@
  * token assinado que carrega apenas o cookie do portal e expira sozinho.
  */
 
+import { detectarInstituicao } from './instituicao';
 import { assinarToken, idConta, lerToken } from './tokens';
 
 const BASE = process.env.APMED_BASE_URL || 'https://gestaoapmed.com.br/provas';
@@ -57,17 +58,6 @@ const TIMEOUT_MS = Number(process.env.APMED_TIMEOUT_MS || 25000);
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
 /* ------------------------------------------------------------------ */
-
-/** Remove acentos, normaliza caixa e separadores, para comparar nomes. */
-export function normalizar(texto: string): string {
-  return (texto || '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[-_/.,()]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /** Extrai o valor de um cookie do cabecalho Set-Cookie. */
 function extrairCookie(setCookie: string | null): string | null {
@@ -264,7 +254,7 @@ export function extrairMateriais(html: string): Material[] {
     const updMatch = card.match(/Atualizado em ([^<]+)<\/p>/);
     const atualizadoEm = updMatch ? updMatch[1].trim() : '';
 
-    const { instituicao, slug } = detectarInstituicao(titulo, descricao, tags);
+    const { instituicao, slug } = detectarInstituicao(titulo);
 
     materiais.push({
       id,
@@ -279,55 +269,6 @@ export function extrairMateriais(html: string): Material[] {
 
   materiais.sort((a, b) => a.id - b.id);
   return materiais;
-}
-
-/**
- * Heuristica para descobrir a instituicao (banca) de um material.
- * Os titulos no site seguem o padrao "BIBLIA <INSTITUICAO> <ANO>".
- */
-const PALAVRAS_INSTITUICAO = [
-  'unicamp', 'usp-rp', 'usp-sp', 'usp rp', 'usp sp', 'hrpp', 'sus-sp',
-  'sus sp', 'famerp', 'famema', 'fmabc', 'fmj', 'scmrp', 'scmsp', 'iamspe',
-  'unifesp', 'puc-sp', 'puc-pr', 'puc sp', 'ufcspa', 'santa casa de limeira',
-  'banco de olhos', 'uerj', 'uema', 'uem', 'uel', 'unesp', 'unitau',
-  'uninove', 'amrigs', 'psu-es', 'psu-mg', 'psu-go', 'hcor', 'hsl',
-  'fao', 'hosp', 'hc', 'sao paulo',
-];
-
-export function detectarInstituicao(
-  titulo: string,
-  descricao = '',
-  tags: string[] = [],
-): { instituicao: string; slug: string } {
-  const alvo = normalizar(`${titulo} ${descricao}`);
-
-  // Preferencia: tag especifica diferente de "Biblias AP MED".
-  for (const tag of tags) {
-    const t = normalizar(tag);
-    if (t && !t.includes('biblia') && !t.includes('ap med')) {
-      return { instituicao: tag, slug: gerarSlug(tag) };
-    }
-  }
-
-  // Depois: palavra-chave conhecida dentro do titulo.
-  const semAcento = alvo;
-  for (const chave of PALAVRAS_INSTITUICAO) {
-    const k = normalizar(chave);
-    if (!k) continue;
-    if (semAcento.includes(k)) {
-      const bonito = chave
-        .split('-')
-        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-        .join(' ');
-      return { instituicao: bonito, slug: gerarSlug(chave) };
-    }
-  }
-
-  return { instituicao: 'Outros', slug: 'outros' };
-}
-
-export function gerarSlug(texto: string): string {
-  return normalizar(texto).replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || 'outros';
 }
 
 /**

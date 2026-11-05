@@ -74,6 +74,61 @@ export function Checkout({
     );
   }
 
+  if (pix.tipo === 'checkout') {
+    return (
+      <Modal aberto titulo="Pagamento no Mercado Pago" aoFechar={aoFechar} fecharNoVeu={false}>
+        <div className="linha entre mb-16">
+          <div>
+            <div className="muted pequeno">Total</div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 850 }}>{formatarReais(pix.valor)}</div>
+          </div>
+          <span className="etiqueta">{plural(pix.materialIds.length, 'material', 'materiais')}</span>
+        </div>
+        <div
+          className={`status-pix ${estado === 'recusado' || estado === 'expirado' ? 'falhou' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          {estado === 'recusado' ? (
+            <>
+              <Icone nome="erro" /> O pagamento foi recusado. Tente outro cartão ou pague com Pix.
+            </>
+          ) : estado === 'expirado' ? (
+            <>
+              <Icone nome="relogio" /> O pagamento foi cancelado ou expirou.
+            </>
+          ) : (
+            <>
+              <span className="girando" /> Aguardando a confirmação do Mercado Pago...
+            </>
+          )}
+        </div>
+        <p className="dica mt-12">
+          Se você ainda não concluiu o pagamento, abra a página do Mercado Pago de novo. Assim que ele for
+          aprovado, o download é liberado aqui automaticamente.
+        </p>
+        <div className="linha entre mt-16">
+          <button className="btn btn-perigo btn-pequeno" onClick={aoCancelar}>
+            {estado === 'aguardando' ? 'Cancelar pedido' : 'Descartar'}
+          </button>
+          <div className="linha">
+            {estado === 'aguardando' && (
+              <button className="btn btn-secundario btn-pequeno" onClick={aoVerificarAgora} disabled={verificando}>
+                {verificando ? <span className="girando" /> : <Icone nome="recarregar" tamanho={15} />}
+                Verificar
+              </button>
+            )}
+            {pix.urlCheckout && estado === 'aguardando' && (
+              <a className="btn btn-primario btn-pequeno" href={pix.urlCheckout}>
+                <Icone nome="externo" tamanho={15} /> Abrir pagamento
+              </a>
+            )}
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal aberto titulo="Pague com Pix" aoFechar={aoFechar} fecharNoVeu={false}>
       <div className="linha entre mb-16">

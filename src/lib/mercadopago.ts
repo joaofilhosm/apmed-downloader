@@ -57,6 +57,8 @@ export type PixCriado = {
 
 export type PagamentoConsultado = {
   id: string;
+  /** false quando o checkout ainda nao gerou nenhum pagamento no Mercado Pago. */
+  encontrado: boolean;
   status: StatusPagamento;
   valor: number; // centavos
   conta: string;
@@ -204,12 +206,88 @@ export async function criarPix(pedido: PedidoPix): Promise<PixCriado> {
 }
 
 /* ------------------------------------------------------------------ */
+/* Checkout Pro (cartao e demais meios na pagina do Mercado Pago)      */
+/* ------------------------------------------------------------------ */
+
+export type CheckoutCriado = { id: string; url: string; expiraEm: number };
+
+export async function criarCheckout(
+  pedido: PedidoPix & { titulos: string[]; urlRetorno: string },
+): Promise<CheckoutCriado> {
+  if (modoPagamento() !== 'mercadopago') {
+    throw new PagamentoError('Pagamento com cartao indisponivel neste servidor.', 503);
+  }
+  const uuid = randomUUID();
+  const expiraEm = Date.now() + 24 * 60 * 60 * 1000;
+  const quantidade = pedido.materiais.length;
+  const retornoHttps = pedido.urlRetorno.startsWith('https://');
+
+  const corpo: Record<string, unknown> = {
+    items: [
+      {
+        id: 'apmed-materiais',
+        title: pedido.descricao.slice(0, 250),
+        description: pedido.titulos.join(', ').slice(0, 250),
+        quantity: 1,
+        currency_id: 'BRL',
+        unit_price: Number((pedido.valor / 100).toFixed(2)),
+      },
+    ],
+    payer: { email: pedido.email },
+    external_reference: `apmed-${uuid}`,
+    metadata: { conta: pedido.conta, materiais: pedido.materiais.join(','), origem: 'apmed-downloader' },
+    back_urls: {
+      success: pedido.urlRetorno,
+      pending: pedido.urlRetorno,
+      failure: pedido.urlRetorno,
+    },
+    payment_methods: { installments: 1 },
+    statement_descriptor: 'APMED DOWNLOADER',
+    expires: true,
+    expiration_date_to: dataMercadoPago(expiraEm),
+  };
+  // auto_return so e aceito com URL publica (https).
+  if (retornoHttps) corpo.auto_return = 'approved';
+  if (pedido.urlNotificacao) corpo.notification_url = pedido.urlNotificacao;
+
+  const res = await chamar('/checkout/preferences', { method: 'POST', body: JSON.stringify(corpo) });
+  const json = (await res.json().catch(() => ({}))) as Record<string, any>;
+  if (!res.ok || !json.init_point) {
+    console.error('[mercadopago] erro ao criar checkout:', res.status, json?.message);
+    throw new PagamentoError('O Mercado Pago recusou a criacao do pagamento. Tente novamente.', 502);
+  }
+  return { id: `ref_${uuid}`, url: String(json.init_point), expiraEm };
+}
+
+/* ------------------------------------------------------------------ */
 /* Consultar                                                           */
 /* ------------------------------------------------------------------ */
 
 export function idValido(id: string): boolean {
   if (id.startsWith('sim_')) return id.length < 4096;
+  if (id.startsWith('ref_')) return /^ref_[0-9a-f-]{36}$/.test(id);
   return /^\d{1,20}$/.test(id);
+}
+
+/**
+ * Checkout Pro: o pedido e acompanhado pela `external_reference`, porque o
+ * pagamento so passa a existir quando o comprador paga na pagina do
+ * Mercado Pago. Se houver mais de uma tentativa, vale a aprovada.
+ */
+async function consultarPorReferencia(id: string): Promise<PagamentoConsultado> {
+  const ref = `apmed-${id.slice(4)}`;
+  const res = await chamar(
+    `/v1/payments/search?external_reference=${encodeURIComponent(ref)}&sort=date_created&criteria=desc&limit=20`,
+  );
+  const json = (await res.json().catch(() => ({}))) as { results?: Record<string, any>[] };
+  if (!res.ok) throw new PagamentoError('Nao foi possivel consultar o pagamento.', 502);
+
+  const lista = json.results || [];
+  const escolhido = lista.find((p) => p.status === 'approved') || lista[0];
+  if (!escolhido) {
+    return { id, encontrado: false, status: 'pending', valor: 0, conta: '', materiais: [], simulado: false };
+  }
+  return deJson(escolhido);
 }
 
 export async function consultarPagamento(id: string): Promise<PagamentoConsultado> {
@@ -228,16 +306,22 @@ export async function consultarPagamento(id: string): Promise<PagamentoConsultad
     const agora = Date.now();
     const status: StatusPagamento =
       agora - dados.t >= SIMULADO_APROVA_EM_MS ? 'approved' : agora > dados.e ? 'expired' : 'pending';
-    return { id, status, valor: dados.v, conta: dados.c, materiais: dados.m, simulado: true };
+    return { id, encontrado: true, status, valor: dados.v, conta: dados.c, materiais: dados.m, simulado: true };
   }
+
+  if (id.startsWith('ref_')) return consultarPorReferencia(id);
 
   const res = await chamar(`/v1/payments/${id}`);
   if (res.status === 404) throw new PagamentoError('Pagamento nao encontrado.', 404);
   const json = (await res.json().catch(() => ({}))) as Record<string, any>;
   if (!res.ok) throw new PagamentoError('Nao foi possivel consultar o pagamento.', 502);
+  return deJson(json);
+}
 
+function deJson(json: Record<string, any>): PagamentoConsultado {
   return {
     id: String(json.id),
+    encontrado: true,
     status: json.status as StatusPagamento,
     valor: Math.round(Number(json.transaction_amount || 0) * 100),
     conta: String(json.metadata?.conta || ''),
