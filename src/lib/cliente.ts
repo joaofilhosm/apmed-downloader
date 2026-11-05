@@ -153,12 +153,27 @@ export function corDe(slug: string): string {
   return PALETA[h % PALETA.length];
 }
 
-/** Sigla curta para a capa (ex.: "BIBLIA UNICAMP 2027" -> "UNICAMP"). */
+const PREPOSICOES = new Set(['DE', 'DO', 'DA', 'DOS', 'DAS', 'E']);
+
+/**
+ * Sigla curta para a etiqueta colorida da banca: nomes curtos ficam como
+ * estao, nomes longos de varias palavras viram iniciais
+ * (BANCO DE OLHOS DE SOROCABA -> BOS).
+ */
 export function sigla(material: Material): string {
-  const inst = material.instituicao && material.instituicao !== 'Outros' ? material.instituicao : '';
-  if (inst) return inst.toUpperCase().slice(0, 14);
-  const palavras = material.titulo.replace(/\b20\d{2}\b/, '').split(/\s+/).filter(Boolean);
-  return (palavras.find((p) => !/^biblia$/i.test(p)) || palavras[0] || 'APMED').toUpperCase().slice(0, 14);
+  const base = (material.instituicao && material.instituicao !== 'Outros'
+    ? material.instituicao
+    : material.titulo.replace(/\b20\d{2}\b/, '').replace(/^(ampliada\s+)?b[ií]blias?\s+/i, '')
+  )
+    .toUpperCase()
+    .trim();
+  if (base.length <= 7) return base || 'APMED';
+  // Primeira palavra ja e uma sigla (PSU-ES SUL HIFA-HECI -> PSU-ES).
+  const primeira = base.split(/\s+/)[0];
+  if (primeira.includes('-') && primeira.length <= 7) return primeira;
+  const palavras = base.split(/[\s\-–]+/).filter((p) => p && !PREPOSICOES.has(p));
+  if (palavras.length > 1) return palavras.map((p) => p[0]).join('').slice(0, 5);
+  return base.slice(0, 7);
 }
 
 /* ------------------------------------------------------------------ */

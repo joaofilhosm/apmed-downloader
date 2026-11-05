@@ -260,7 +260,7 @@ export function Catalogo({
               ref={buscaRef}
               className="entrada com-icone"
               type="search"
-              placeholder="Buscar banca, hospital ou ano"
+              placeholder="Buscar banca ou ano"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               onKeyDown={(e) => e.key === 'Escape' && setBusca('')}
@@ -336,7 +336,7 @@ export function Catalogo({
               return (
                 <li key={m.id} className={`ficha ${no ? 'no-carrinho' : ''}`}>
                   <span className="aba-banca" style={{ background: corDe(m.slug) }} aria-hidden>
-                    {sigla(m).slice(0, 12)}
+                    {sigla(m)}
                   </span>
                   <div style={{ minWidth: 0 }}>
                     <h3 title={m.titulo}>
