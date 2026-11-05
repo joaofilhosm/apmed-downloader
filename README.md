@@ -49,6 +49,21 @@ navegador ──GET /api/pagamento/:id──▶ consulta o Mercado Pago (fonte d
 - Sem `MERCADOPAGO_ACCESS_TOKEN`: em desenvolvimento os pagamentos são **simulados**
   (aprovam sozinhos em ~8s); em produção o checkout fica **desativado**.
 
+### 🧾 Modo atendimento (venda direta)
+
+Para quem paga direto com você, sem passar pelo carrinho e pelo Pix, existe a página
+**`/atendimento`** (fora da navegação e marcada como `noindex`):
+
+1. Você entra com o usuário de operador (`OPERADOR_EMAIL` + senha cujo hash está em `OPERADOR_SENHA_HASH`).
+2. Digita o e-mail e a senha do APMED que o cliente enviou.
+3. Marca os materiais pedidos e baixa (PDF ou ZIP).
+
+Como é protegido: a senha do operador só existe como hash (scrypt) nas variáveis de ambiente;
+o login tem limite de 8 tentativas por 15 min e espera nas falhas; a sessão de atendimento é um
+token assinado que **só o servidor emite**, e apenas para quem apresentar o token do operador.
+Clientes comuns continuam precisando de pagamento aprovado. Para trocar a senha:
+`npm run operador:hash -- 'nova senha'` e atualize `OPERADOR_SENHA_HASH`.
+
 ---
 
 ## 🐛 O problema do `last_page`
@@ -133,6 +148,7 @@ Solução implementada:
 | Sessão e licenças em cabeçalhos, não na URL | `lib/http.ts` |
 | Headers de segurança (HSTS, X-Frame-Options...) | `next.config.js` |
 | Produção recusa rodar sem `APMED_SESSION_SECRET` | `lib/tokens.ts` |
+| Modo atendimento: senha só como hash scrypt, rate limit, token separado | `lib/operador.ts`, `api/operador/*` |
 | Material precisa pertencer à conta | Validado contra a lista real em todas as rotas |
 | `Cache-Control: no-store` em todas as rotas | `next.config.js` |
 | Erros não expõem detalhes internos | Mensagens genéricas para o usuário |

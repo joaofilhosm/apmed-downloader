@@ -37,12 +37,18 @@ const PROPOSITO_SESSAO = 'sessao.v2';
 /** Tempo maximo de vida de uma sessao (30 min). */
 export const SESSAO_TTL_MS = 30 * 60 * 1000;
 
-type DadosSessao = { c: string; u: string; e: number };
+type DadosSessao = { c: string; u: string; e: number; o?: 1 };
 
 /** Gera um token de sessao assinado contendo o cookie do APMED. */
-function gerarTokenSessao(cookie: string, conta: string): { token: string; exp: number } {
+function gerarTokenSessao(
+  cookie: string,
+  conta: string,
+  operador: boolean,
+): { token: string; exp: number } {
   const exp = Date.now() + SESSAO_TTL_MS;
-  return { token: assinarToken<DadosSessao>(PROPOSITO_SESSAO, { c: cookie, u: conta, e: exp }), exp };
+  const dados: DadosSessao = { c: cookie, u: conta, e: exp };
+  if (operador) dados.o = 1;
+  return { token: assinarToken<DadosSessao>(PROPOSITO_SESSAO, dados), exp };
 }
 
 /** Valida um token de sessao. */
@@ -112,9 +118,14 @@ export type Sessao = {
   /** Id anonimo e estavel da conta (HMAC do e-mail). */
   conta: string;
   expiraEm: number;
+  /**
+   * Sessao aberta pelo operador no modo atendimento: o download dispensa
+   * pagamento. So o servidor cria uma (a flag vai dentro do token assinado).
+   */
+  operador: boolean;
 };
 
-export function criarSessao(email: string, senha: string): Promise<Sessao> {
+export function criarSessao(email: string, senha: string, operador = false): Promise<Sessao> {
   const body = new URLSearchParams({ email, password: senha }).toString();
 
   return (async () => {
@@ -166,8 +177,8 @@ export function criarSessao(email: string, senha: string): Promise<Sessao> {
     }
 
     const conta = idConta(email);
-    const { token, exp } = gerarTokenSessao(cookie, conta);
-    return { id: token, cookie, conta, expiraEm: exp };
+    const { token, exp } = gerarTokenSessao(cookie, conta, operador);
+    return { id: token, cookie, conta, expiraEm: exp, operador };
   })();
 }
 
@@ -175,7 +186,7 @@ export function criarSessao(email: string, senha: string): Promise<Sessao> {
 export function obterSessao(id: string): Sessao | null {
   const dados = validarTokenSessao(id);
   if (!dados) return null;
-  return { id, cookie: dados.c, conta: dados.u, expiraEm: dados.e };
+  return { id, cookie: dados.c, conta: dados.u, expiraEm: dados.e, operador: dados.o === 1 };
 }
 
 /**

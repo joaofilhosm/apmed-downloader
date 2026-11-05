@@ -57,6 +57,11 @@ export function sessaoDe(req: NextRequest): Sessao | null {
   return obterSessao(token);
 }
 
+/** Token do operador (modo atendimento), enviado no cabecalho `x-operador`. */
+export function tokenOperadorDe(req: NextRequest): string {
+  return req.headers.get('x-operador') || '';
+}
+
 /** Licencas enviadas no cabecalho `x-licencas`, separadas por espaco. */
 export function licencasDe(req: NextRequest): string[] {
   return (req.headers.get('x-licencas') || '')

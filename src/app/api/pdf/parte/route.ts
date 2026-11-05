@@ -54,8 +54,9 @@ export async function GET(req: NextRequest) {
   const sessao = sessaoDe(req);
   if (!sessao) return erro('Sua sessao expirou. Entre novamente.', 401);
 
-  // Download so e liberado com uma licenca paga que cubra este material.
-  if (!licencaCobre(licencasDe(req), sessao.conta, materialId)) {
+  // Download so e liberado com uma licenca paga que cubra este material,
+  // ou numa sessao aberta pelo operador (modo atendimento, venda direta).
+  if (!sessao.operador && !licencaCobre(licencasDe(req), sessao.conta, materialId)) {
     return erro('Este material ainda nao foi pago. Adicione ao carrinho para liberar.', 402);
   }
 
