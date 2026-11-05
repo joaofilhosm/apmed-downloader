@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { erro, licencasDe, sessaoDe } from '@/lib/http';
+import { licencaCobre } from '@/lib/licenca';
 import {
-  obterSessao,
   obterTokenLeitura,
   contarPaginas,
   listarMateriais,
@@ -20,12 +21,8 @@ const PAGINAS_POR_PARTE = 12;
 /** Numero de partes por requisicao. */
 const PARTES_POR_DOWNLOAD = 3;
 
-function erro(mensagem: string, status = 500) {
-  return NextResponse.json({ ok: false, erro: mensagem }, { status });
-}
-
 /**
- * GET /api/pdf/manifesto?sessaoId=...&materialId=...
+ * GET /api/pdf/manifesto?materialId=...   (cabecalhos x-sessao e x-licencas)
  *
  * Descobre o total REAL de paginas do material e devolve o plano de
  * download (quantas partes, com quais paginas).
@@ -37,15 +34,19 @@ function erro(mensagem: string, status = 500) {
  */
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const sessaoId = params.get('sessaoId') || '';
   const materialId = Number(params.get('materialId'));
 
   if (!materialId || Number.isNaN(materialId)) {
     return erro('Material invalido.', 400);
   }
 
-  const sessao = obterSessao(sessaoId);
+  const sessao = sessaoDe(req);
   if (!sessao) return erro('Sua sessao expirou. Entre novamente.', 401);
+
+  // Download so e liberado com uma licenca paga que cubra este material.
+  if (!licencaCobre(licencasDe(req), sessao.conta, materialId)) {
+    return erro('Este material ainda nao foi pago. Adicione ao carrinho para liberar.', 402);
+  }
 
   try {
     const materiais = await listarMateriais(sessao.cookie);
