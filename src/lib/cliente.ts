@@ -143,25 +143,14 @@ export function dataPortal(texto: string): number {
 /* Visual                                                              */
 /* ------------------------------------------------------------------ */
 
-const PALETA = [
-  ['#3355ff', '#6f86ff'],
-  ['#0fa89a', '#34d1c1'],
-  ['#7c3aed', '#a78bfa'],
-  ['#db2777', '#f472b6'],
-  ['#ea580c', '#fb923c'],
-  ['#0284c7', '#38bdf8'],
-  ['#16a34a', '#4ade80'],
-  ['#ca8a04', '#facc15'],
-  ['#be123c', '#fb7185'],
-  ['#4f46e5', '#818cf8'],
-];
+// Tons solidos e sobrios, legiveis com texto branco nos dois temas.
+const PALETA = ['#2e6b5e', '#3a5a8c', '#7a4e8c', '#9c4335', '#806418', '#2f7f95', '#5c6b2e', '#8a3b5c'];
 
-/** Gradiente estavel por instituicao (mesma banca, mesma cor). */
+/** Cor estavel por instituicao (mesma banca, mesma cor). */
 export function corDe(slug: string): string {
   let h = 0;
   for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
-  const [a, b] = PALETA[h % PALETA.length];
-  return `linear-gradient(135deg, ${a}, ${b})`;
+  return PALETA[h % PALETA.length];
 }
 
 /** Sigla curta para a capa (ex.: "BIBLIA UNICAMP 2027" -> "UNICAMP"). */
